@@ -197,7 +197,7 @@ class InvertedIndex:
         sorted_indices = np.argsort(-scores)
         return filtered_indices[sorted_indices], scores[sorted_indices]
 
-class BM25Retriver:
+class BM25Retriever:
     def __init__(self,
                  index_path,
                  index_name,
