@@ -21,7 +21,8 @@ class InvertedIndex:
                  index_path=None, 
                  file_name="array_index.h5py",
                  force_rebuild=False,
-                 ignore_keys=False):
+                 ignore_keys=False, 
+                 ignore_token_before=173):
         os.makedirs(index_path, exist_ok=True)
         
         self.file_path = os.path.join(index_path, file_name)
@@ -45,13 +46,16 @@ class InvertedIndex:
             self.total_docs = 0        
 
         self.numba = False
+        if ignore_keys:
+            self.ignore_keys = ignore_keys
+            self.ignore_token_before = ignore_token_before
             
     def load(self, path=None, method=None):
         path = path if path is not None else self.file_path
         method = method if method is not None else self.save_method
-        print("Loading index from {}".format(self.path))
+        print("Loading index from {}".format(path))
         if method == "h5py":
-            with h5py.File(self.path, "r") as f:
+            with h5py.File(path, "r") as f:
                 self.index_ids = dict()
                 self.index_values = dict()
                 dim = f["dim"][()]
@@ -65,12 +69,12 @@ class InvertedIndex:
                         self.index_values[key] = np.array([], dtype=np.float32)
                 f.close()
         elif method == "pkl":
-            with open(self.path, "rb") as f:
+            with open(path, "rb") as f:
                 index_ids, index_values, total_docs = pickle.load(f)
                 self.index_ids, self.index_values, self.total_docs = index_ids, index_values, total_docs
                 f.close()
         elif method == "bin":
-            with open(self.path, "rb") as f:
+            with open(path, "rb") as f:
                 num_keys, total_docs = struct.unpack('I I', f.read(8))
                 index_ids = dict()
                 index_values = dict()
@@ -140,12 +144,16 @@ class InvertedIndex:
         print("Dist dumped.")
 
     def add_item(self, col, row, value):
+        if self.ignore_keys and row < self.ignore_token_before:
+            return
         self.index_ids[col].append(int(row))
         self.index_values[col].append(value)
         self.total_docs += 1
 
     def add_batch_item(self, col, row, value):
         for r, c, v in zip(row, col, value):
+            if self.ignore_keys and r < self.ignore_token_before:
+                continue
             self.index_ids[c].append(int(r))
             self.index_values[c].append(v)
         self.total_docs += len(set(row))

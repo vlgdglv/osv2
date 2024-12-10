@@ -14,6 +14,19 @@ from collections import defaultdict
 logger = logging.getLogger(__name__)
 
 from inverted_index import BM25Retriever
+from ms_datasets import TextDatasetLMDBMeta, loads_data, load_passages_lmdb
+
+def get_iterator(args):
+    train_doc_pool_txn, test_doc_pool_txn = load_passages_lmdb(args)
+    n_passages = loads_data(test_doc_pool_txn.get(b'__len__'))
+    print("Total passages: ", n_passages)
+
+    id2id = json.load(open(os.path.join(args.passage_path,'id2id_test.json')))
+    dataset = TextDatasetLMDBMeta(0, n_passages, test_doc_pool_txn, tokenizer, args, id2id)
+
+    for idx in tqdm(range(n_passages)):
+        cont = dataset[idx]
+        yield cont
 
 def eval_with_pytrec(runs, qrel_path, output_path=None):
     with open(qrel_path, 'r') as f:
@@ -76,20 +89,21 @@ def eval_with_pytrec(runs, qrel_path, output_path=None):
         return res
 
 def text_clean(text):
-    text = text.replace("#n#", " ").replace("<sep>", " ").replace("#tab#", " ").replace("#r#", " ").replace("\t", " ")
-    return " ".join(text.split())
+    text = text.replace("#N#", " ")
+    return text
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--tokenizer_name", type=str, required=False, default="bert-base-multilingual-uncased")
     parser.add_argument("--build_index", action="store_true")
-    parser.add_argument("--corpus_path", type=str, required=False)
+    parser.add_argument("--passage_path", type=str, required=False)
     parser.add_argument("--index_path", type=str, required=False)
     parser.add_argument("--index_name", type=str, required=False)
     parser.add_argument("--do_tokenize", action="store_true")
     parser.add_argument("--index_file_name", type=str, default="array_index", required=False)
     parser.add_argument("--force_rebuild", action="store_true")
+    parser.add_argument("--max_seq_length", default=512, type=int)
     
     # BM25 params
     parser.add_argument("--method", type=str, default="lucene", required=False)
@@ -112,16 +126,15 @@ if __name__ == "__main__":
 
         corpus_idx, corpus_list = [], []
         if args.do_tokenize:
-            with open(args.corpus_path, "r", encoding="utf-8") as f:
-                for line in tqdm(f, desc="Tokenizing"):
-                    lines = line.split('\t')
-                    url, language, doc_id, title, body = lines
-                    title = text_clean(title)
-                    body = text_clean(' '.join(body.strip().split(' ')[:500]))
-                    corpus_idx.append(doc_id)
-                    corpus_list.append(tokenizer.encode(body))
+            runner = get_iterator(args)
+            for thing in runner:
+                doc_id, body = thing
+                ids = tokenizer.encode(body, add_special_tokens=False)
+                body = text_clean(body)
+                corpus_idx.append(doc_id)
+                corpus_list.append(ids)
         else:
-            with open(args.corpus_path, "r") as f:
+            with open(args.passage_path, "r") as f:
                 for line in tqdm(f, desc="Loading"):
                     content = json.loads(line.strip())
                     corpus_idx.append(int(content["text_id"]))
