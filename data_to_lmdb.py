@@ -157,6 +157,76 @@ def dump_lmdb_single(filename, output_dir):
     env.sync()
     env.close()
 
+
+def add_missing_lmdb(filename, output_dir, missing_list_path):
+    with open(missing_list_path, "rb") as f:
+        missing_ids_test = pickle.load(f)
+
+    missing_ids_test_set = set([int(x) for x in missing_ids_test])
+    total_missing = len(missing_ids_test_set)
+    print("Missing ids in test set: {}".format(total_missing))
+    write_frequency = 100
+    tokenizer = BertTokenizerFast.from_pretrained("bert-base-multilingual-uncased")
+    max_seq_length = 128
+
+    env = lmdb.open(output_dir, map_size=1099511627776*2, readonly=False, meminit=False, map_async=True)
+    txn = env.begin(write=True)
+
+    filename_list = [os.path.join(filename, f'part-{i}') for i in range(0, 10)]
+
+    line_queue = Queue(maxsize=10)
+    reader_thread = threading.Thread(target=file_reader_thread, args=(filename_list, line_queue))
+    reader_thread.start()
+    start_time = time.time()
+    write_i = 0
+    while True:
+        batch_lines = line_queue.get()
+        if batch_lines is None:
+            break
+        doc_ids, input_ids_list = process_missing(batch_lines, tokenizer, max_seq_length)
+
+        for doc_id, input_ids in zip(doc_ids, input_ids_list):
+            txn.put(doc_id.encode(), pickle.dumps(input_ids))
+            write_i += 1
+            if write_i % write_frequency == 0:
+                print("Writing missings: {} entry".format(write_i / total_missing))
+                txn.commit()
+                txn = env.begin(write=True)
+    txn.commit()
+    env.sync()
+    env.close()
+    reader_thread.join()
+    print("Final write: {} entry".format(write_i / total_missing))
+
+def process_missing(lines, tokenizer, max_seq_length, missing_set):
+    doc_ids = []
+    texts = []
+    for line in lines:
+        parts = line.split('\t')
+        url, language, doc_id, title, body = parts
+        if int(doc_id) in missing_set:
+            url = url_clean(url)
+            title = text_clean(title)
+            body = text_clean(' '.join(body.strip().split(' ')[:500]))
+            combined_text = url + " [SEP] " + title + " [SEP] " + body
+        if len(combined_text) > 0:
+            doc_ids.append(doc_id)
+            texts.append(combined_text)
+        else:
+            continue
+
+    encoded = tokenizer(
+        texts, 
+        truncation=True,
+        max_length=max_seq_length, 
+        return_attention_mask=False, 
+        return_token_type_ids=False
+    )
+    return doc_ids, encoded['input_ids']
+
+
 if __name__=='__main__':
-    dump_lmdb('data/collection_test', 'data/lmdb_data/test_ids_lmdb_new')
+    # dump_lmdb('data/collection_test', 'data/lmdb_data/test_ids_lmdb_new')
+    # gather_missing_lines()
     #dump_lmdb('/kun_data/Jena/100m/collection_test.tsv', '/kun_data/Jena/100m/test_lmdb')
+    pass

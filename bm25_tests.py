@@ -6,6 +6,7 @@ import json
 import argparse
 import logging
 
+import lmdb
 import pytrec_eval
 import numpy as np
 from tqdm import tqdm
@@ -14,15 +15,21 @@ from collections import defaultdict
 logger = logging.getLogger(__name__)
 
 from inverted_index import BM25Retriever
-from ms_datasets import TextDatasetLMDBMeta, loads_data, load_passages_lmdb
+from ms_datasets import TextDatasetLMDBMeta, loads_data, load_passages_lmdb, TextIdsDatasetLMDBMeta
 
 def get_iterator(args):
-    train_doc_pool_txn, test_doc_pool_txn = load_passages_lmdb(args)
+    passages_path = args.passage_path
+    logger.info(f'Loading passages from: {passages_path}')
+    doc_pool_env_test = lmdb.open(passages_path, subdir=os.path.isdir(passages_path), readonly=True, lock=False, readahead=False, meminit=False)
+    test_doc_pool_txn = doc_pool_env_test.begin(write=False)
     n_passages = loads_data(test_doc_pool_txn.get(b'__len__'))
     print("Total passages: ", n_passages)
 
-    id2id = json.load(open(os.path.join(args.passage_path,'id2id_test.json')))
-    dataset = TextDatasetLMDBMeta(0, n_passages, test_doc_pool_txn, tokenizer, args, id2id)
+    if args.enable_id2id:
+        id2id = json.load(open(os.path.join(args.passage_path,'id2id_test.json')))
+    else:
+        id2id = None
+    dataset = TextIdsDatasetLMDBMeta(0, n_passages, test_doc_pool_txn, args, id2id)
 
     for idx in tqdm(range(n_passages)):
         cont = dataset[idx]
@@ -99,11 +106,12 @@ if __name__ == "__main__":
     parser.add_argument("--build_index", action="store_true")
     parser.add_argument("--passage_path", type=str, required=False)
     parser.add_argument("--index_path", type=str, required=False)
+    parser.add_argument("--enable_id2id", action="store_true")
     parser.add_argument("--index_name", type=str, required=False)
     parser.add_argument("--do_tokenize", action="store_true")
     parser.add_argument("--index_file_name", type=str, default="array_index", required=False)
     parser.add_argument("--force_rebuild", action="store_true")
-    parser.add_argument("--max_seq_length", default=512, type=int)
+    parser.add_argument("--max_seq_length", default=128, type=int)
     
     # BM25 params
     parser.add_argument("--method", type=str, default="lucene", required=False)
@@ -125,20 +133,11 @@ if __name__ == "__main__":
                              force_rebuild=args.force_rebuild)
 
         corpus_idx, corpus_list = [], []
-        if args.do_tokenize:
-            runner = get_iterator(args)
-            for thing in runner:
-                doc_id, body = thing
-                ids = tokenizer.encode(body, add_special_tokens=False)
-                body = text_clean(body)
-                corpus_idx.append(doc_id)
-                corpus_list.append(ids)
-        else:
-            with open(args.passage_path, "r") as f:
-                for line in tqdm(f, desc="Loading"):
-                    content = json.loads(line.strip())
-                    corpus_idx.append(int(content["text_id"]))
-                    corpus_list.append(content["text"])
+        runner = get_iterator(args)
+        for cont in runner:
+            doc_id, text_ids = cont
+            corpus_idx.append(doc_id)
+            corpus_list.append(text_ids)
         print("Corpus Loaded: {}".format(len(corpus_idx)))
         # print("Text encode done")
         bm25.index(corpus_idx, corpus_list, tokenizer.vocab.values())
@@ -148,7 +147,7 @@ if __name__ == "__main__":
         # token = Tokenizer(tokenizer_path=args.tokenizer_path, stemmer=stemmer)
         tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name)
         bm25 = BM25Retriever(args.index_path, args.index_name, k1=args.k1, b=args.b, delta=args.delta)
-
+        
         query_idx, query_list = [], []
         if args.do_tokenize:
             with open(args.query_path, "r", encoding="utf-8") as f:

@@ -112,6 +112,7 @@ class TextIdsDatasetLMDBMeta(torch.utils.data.Dataset):
             real_index = str(self.id2id[str(index + self.start_idx)])
         else:
             real_index = str(index + 1 + self.start_idx)
+        
         text = pickle.loads(self.doc_pool_txn.get(real_index.encode()))
         
         return real_index, text
@@ -145,15 +146,28 @@ if __name__ == "__main__":
     # n_passages = loads_data(test_doc_pool_txn.get(b'__len__'))
     # print("Test collection", n_passages)
 
-    id2id = json.load(open(os.path.join(args.passage_path,'id2id_test.json')))
+    # id2id = json.load(open(os.path.join(args.passage_path,'id2id_test.json')))
 
-    passages_train_path = "data/lmdb_data/test_ids_lmdb_new"
+    passages_train_path = "/datacosmos/local/User/baoht/onesparse2/marcov2/data/lmdb_data/test_ids_lmdb_new"
+    # passages_train_path = "/datacosmos/local/User/baoht/onesparse2/marcov2/data/lmdb_data/train_ids_lmdb"
     logger.info(f'Loading passages from: {passages_train_path}')
     doc_pool_env = lmdb.open(passages_train_path, subdir=os.path.isdir(passages_train_path), readonly=True, lock=False, readahead=False, meminit=False)
     txn = doc_pool_env.begin(write=False)
+    stats = doc_pool_env.stat()
+    print("Number of entries:", stats['entries'])
+    n_passages = loads_data(txn.get(b'__len__'))
+    print("Collection size", n_passages)
 
-    dataset = TextIdsDatasetLMDBMeta(0, 10000000, txn, args, id2id)
-    print(dataset[0])
+
+    dataset = TextIdsDatasetLMDBMeta(0, 10000000, txn, args)
+    missings_list = []
+    for idx in tqdm(range(n_passages)):
+        realid, text = dataset[idx]
+        if text == -1:
+            missings_list.append(realid)
+    print(missings_list)
+    print("Missings", len(missings_list))
+    # print(dataset[0])
     # dataset = TextDatasetLMDBMeta(0, n_passages, test_doc_pool_txn, tokenizer, args, id2id)
     # print(dataset[0])
 
