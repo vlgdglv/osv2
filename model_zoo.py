@@ -20,7 +20,6 @@ class MultiTaskEncoder(nn.Module):
     def __init__(self, 
                  config, 
                  encoder,
-                 dense_pooler,
                  mlm_head,
                  ):
         super(MultiTaskEncoder, self).__init__()
@@ -35,13 +34,7 @@ class MultiTaskEncoder(nn.Module):
             tasks[1] = True
         self.tasks = tasks
 
-        if config.use_dense_pooler:
-            self.dense_pooler = dense_pooler
-        else:
-            self.dense_pooler = None
-        self.use_dense_pooler = config.use_dense_pooler
         self.mlm_head = mlm_head 
-
         self.sparse_pooler = SparsePooler(config)
         self.bert_pooler = BertPooler(config.dense_pooler_type)
 
@@ -70,36 +63,49 @@ class MultiTaskEncoder(nn.Module):
     def save_model(self, output_dir):
         os.makedirs(output_dir, exist_ok=True)
         self.encoder.save_pretrained(output_dir)
-        if self.use_dense_pooler and self.dense_pooler is not None:
-            torch.save(self.dense_pooler.state_dict(), os.path.join(output_dir, "dense_pooler.pth"))
         if self.mlm_head is not None:
             torch.save(self.mlm_head.state_dict(), os.path.join(output_dir, "mlm_head.pth"))
 
+    def load_model(self, output_dir):
+        self.encoder.load_pretrained(output_dir)
+        if self.mlm_head is not None:
+            self.mlm_head.load_state_dict(torch.load(os.path.join(output_dir, "mlm_head.pth")))
+
     @classmethod
     def build_model(cls, config):
-        encoder = MultiTaskBert.from_pretrained(config.dense_q_encoder_path)
-        task_list = config.task_list
-        task_list = task_list.strip().split(",")
-        
-        if "sparse" in task_list:
-            mlm_head = MLMHead(config.hidden_size, config.vocab_size)
-            if config.dense_q_mlm_head_path is not None:
-                if os.path.exists(config.dense_q_mlm_head_path):
-                    mlm_head.load_state_dict(torch.load(config.dense_q_mlm_head_path))
-                else:
-                    full_model = AutoModelForMaskedLM.from_pretrained(config.dense_q_mlm_head_path)
-                    cls_head = full_model.cls
-                    mlm_head.load_state_dict(cls_head.state_dict())
-        else:
-            mlm_head = None
-
+        encoder = MultiTaskBert.from_pretrained(config.encoder_name_or_path)
+        mlm_head = MLMHead(config.hidden_size, config.vocab_size)
         return cls(config, encoder, mlm_head)
+
+
+class BiEncoder(nn.Module):
+    def __init__(self, config):
+        super(BiEncoder, self).__init__()
+        self.q_encoder = MultiTaskEncoder.build_model(config)
+        self.k_encoder = self.q_encoder if config.share_encoder else MultiTaskEncoder.build_model(config)
+    
+    def forward(self, **inputs):
+        query = inputs["query"]
+        passages = inputs["passages"]
+        q_results = self.q_encoder(**query)
+        k_results = self.k_encoder(**passages)
+        return {"q_results": q_results, "k_results": k_results}
+
+    def save_model(self, output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+        self.q_encoder.save_model(os.path.join(output_dir, "q_encoder"))
+        self.k_encoder.save_model(os.path.join(output_dir, "k_encoder"))
+
+
+    def load_models(self, q_encoder_path, k_encoder_path):
+        self.q_encoder.load_model(q_encoder_path)
+        self.k_encoder.load_model(k_encoder_path)
+
 
 class SparsePooler(nn.Module):
     def __init__(self, config):
         super(SparsePooler, self).__init__()
         self.pooler_type = config.sparse_pooler_type
-        self.pooler_softmax = config.sparse_pooler_softmax
 
     def forward(self, logits, attention_mask):
         saturated = torch.log(1 + torch.relu(logits)) * attention_mask.unsqueeze(-1)
@@ -184,7 +190,6 @@ class BertPooler(nn.Module):
 
 class MultiTaskBertConfig(BertConfig):
     model_type = "mutli_task_bert_for_retrieval"
-
     def __init__(self, num_shared_layer=8, num_task_layer=4, num_task_bert=2, **kwargs):
         super(MultiTaskBertConfig, self).__init__(**kwargs)
         self.num_shared_layer = num_shared_layer
@@ -205,9 +210,8 @@ class MultiTaskBert(BertPreTrainedModel):
         # encoder0: dense sentence embedding 
         # encoder1: sparse splade
         # encoder2: dense term embedding
-        for i in range(hfconfig.num_task_bert):
+        for _ in range(hfconfig.num_task_bert):
             self.task_encode_list.append(nn.ModuleList([BertLayer(hfconfig) for _ in range(hfconfig.num_task_layer)]))
-
 
     def forward(self, **inputs):
         # Shared encoder:
