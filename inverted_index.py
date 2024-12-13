@@ -46,8 +46,8 @@ class InvertedIndex:
             self.total_docs = 0        
 
         self.numba = False
+        self.ignore_keys = ignore_keys
         if ignore_keys:
-            self.ignore_keys = ignore_keys
             self.ignore_token_before = ignore_token_before
             
     def load(self, path=None, method=None):
@@ -152,7 +152,7 @@ class InvertedIndex:
 
     def add_batch_item(self, col, row, value):
         for r, c, v in zip(row, col, value):
-            if self.ignore_keys and r < self.ignore_token_before:
+            if self.ignore_keys and int(r) < self.ignore_token_before:
                 continue
             self.index_ids[c].append(int(r))
             self.index_values[c].append(v)
@@ -213,14 +213,16 @@ class BM25Retriever:
                  k1=1.2,
                  b=0.75,
                  delta=0.5,
-                 force_rebuild=False):
+                 force_rebuild=False,
+                 ignore_keys=True):
         self.method = method
         self.k1 = k1
         self.b = b
         self.delta = delta
+        self.avg_doc_len = 124.9418149575661
 
         self.index_path = index_path
-        self.invert_index = InvertedIndex(index_path, index_name, force_rebuild=force_rebuild)
+        self.invert_index = InvertedIndex(index_path, index_name, force_rebuild=force_rebuild, ignore_keys=ignore_keys)
         print("BM25 index total docs: {}".format(self.invert_index.total_docs)) 
 
     def index(self,
@@ -229,7 +231,8 @@ class BM25Retriever:
               vocab_ids):
         n_docs, n_vocab = len(corpus_ids), len(vocab_ids)
         print("Total docs: {}, vocab size: {}".format(n_docs, n_vocab))
-        avg_doc_len = np.mean([len(doc) for doc in corpus_ids])
+        avg_doc_len = np.mean([len(doc) for doc in corpus_ids]) if self.avg_doc_len is None else self.avg_doc_len
+        print("Avg doc length: {}".format(avg_doc_len))
 
         doc_frequencies = self._calc_doc_frequencies(corpus_ids, vocab_ids)
         idf_array = self._calc_idf_array(select_idf_scorer(self.method), doc_frequencies, n_docs)
@@ -257,7 +260,6 @@ class BM25Retriever:
     
     def _calc_doc_frequencies(self, corpus_ids, vocab_ids):
         vocab_set = set(vocab_ids)
-    
         doc_freq_dict = {token_id: 0 for token_id in vocab_ids}
 
         for doc in corpus_ids:

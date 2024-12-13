@@ -25,8 +25,8 @@ def get_iterator(args):
     n_passages = loads_data(test_doc_pool_txn.get(b'__len__'))
     print("Total passages: ", n_passages)
 
-    if args.enable_id2id:
-        id2id = json.load(open(os.path.join(args.passage_path,'id2id_test.json')))
+    if args.idmap_path:
+        id2id = json.load(open(args.idmap_path))
     else:
         id2id = None
     dataset = TextIdsDatasetLMDBMeta(0, n_passages, test_doc_pool_txn, args, id2id)
@@ -106,7 +106,7 @@ if __name__ == "__main__":
     parser.add_argument("--build_index", action="store_true")
     parser.add_argument("--passage_path", type=str, required=False)
     parser.add_argument("--index_path", type=str, required=False)
-    parser.add_argument("--enable_id2id", action="store_true")
+    parser.add_argument("--idmap_path", type=str, default=None, required=False)
     parser.add_argument("--index_name", type=str, required=False)
     parser.add_argument("--do_tokenize", action="store_true")
     parser.add_argument("--index_file_name", type=str, default="array_index", required=False)
