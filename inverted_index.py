@@ -225,6 +225,25 @@ class BM25Retriever:
         self.invert_index = InvertedIndex(index_path, index_name, force_rebuild=force_rebuild, ignore_keys=ignore_keys)
         print("BM25 index total docs: {}".format(self.invert_index.total_docs)) 
 
+    def retrieve(self, query_ids, topk=100, threshold=0.0):
+        if self.invert_index.numba:
+            scores = self.invert_index.numba_match(
+                self.invert_index.numba_index_ids,
+                self.invert_index.numba_index_values,
+                query_ids, corpus_size=self.invert_index.total_docs)
+            
+        else:
+            scores = self.invert_index.match(query_ids, corpus_size=self.invert_index.total_docs)    
+        filtered_indices = np.argwhere(scores > threshold)[:, 0]
+        scores = scores[filtered_indices]
+        # select top K
+        if len(scores) > topk:
+            top_indices = np.argpartition(scores, -topk)[-topk:]
+            filtered_indices, scores = filtered_indices[top_indices], scores[top_indices]
+        sorted_indices = np.argsort(-scores)
+
+        return filtered_indices[sorted_indices], scores[sorted_indices]
+
     def index(self,
               corpus_index,
               corpus_ids,
