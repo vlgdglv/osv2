@@ -160,7 +160,7 @@ def compute_metrics(qids_to_relevant_passageids, qids_to_ranked_candidate_passag
                     break
     if len(ranking) == 0:
         raise IOError("No matching QIDs found. Are you sure you are scoring the evaluation set?")
-
+    
     MRR = MRR / len(qids_to_relevant_passageids)
     recall_top1 = len(recall_q_top1) * 1.0 / len(qids_to_relevant_passageids)
     recall_top5 = len(recall_q_top5) * 1.0 / len(qids_to_relevant_passageids)
@@ -263,13 +263,11 @@ if __name__ == "__main__":
             #     # out.write(f"{qid}\t{docid}\t{rank+1}\t{score}\n")
             #     res[str(qid)][str(mapping_func(str(docid)))] = float(score)
             # for simple eval
-            qids_to_ranked_candidate_passages[int(qid)] = indices
+            qids_to_ranked_candidate_passages[int(qid)] = [int(mapping_func(str(docid))) for docid in indices]
             # for rank, (docid, score) in enumerate(zip(indices, scores)):
-            #     # out.write(f"{qid}\t{docid}\t{rank+1}\t{score}\n")
-            #     res[str(qid)][str(mapping_func(str(docid)))] = float(score)
-            if cnt > 100:
-                break
-            cnt += 1 
+                # out.write(f"{qid}\t{docid}\t{rank+1}\t{score}\n")
+            break
+
             
     # eval_with_pytrec(res, args.gt_path)
     reldict = load_reference_from_stream(args.gt_path)   

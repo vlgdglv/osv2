@@ -72,8 +72,8 @@ class MultiTaskEncoder(nn.Module):
             self.mlm_head.load_state_dict(torch.load(os.path.join(output_dir, "mlm_head.pth")))
 
     @classmethod
-    def build_model(cls, config):
-        encoder = MultiTaskBert.from_pretrained(config.encoder_name_or_path)
+    def build_model(cls, config, load_name_or_path):
+        encoder = MultiTaskBert.from_pretrained(load_name_or_path)
         mlm_head = MLMHead(config.hidden_size, config.vocab_size)
         return cls(config, encoder, mlm_head)
 
@@ -81,8 +81,14 @@ class MultiTaskEncoder(nn.Module):
 class BiEncoder(nn.Module):
     def __init__(self, config):
         super(BiEncoder, self).__init__()
-        self.q_encoder = MultiTaskEncoder.build_model(config)
-        self.k_encoder = self.q_encoder if config.share_encoder else MultiTaskEncoder.build_model(config)
+        encoder_name_or_path = config.encoder_name_or_path
+        if not os.path.exists(encoder_name_or_path) or config.share_encoder:
+            k_load_from = q_load_from = encoder_name_or_path
+        else:
+            k_load_from, q_load_from = os.path.join(encoder_name_or_path, "k_encoder"), os.path.join(encoder_name_or_path, "q_encoder")
+            self.k_encoder_path, self.q_encoder_path = k_load_from, q_load_from
+        self.k_encoder = MultiTaskEncoder.build_model(config, k_load_from)
+        self.q_encoder = MultiTaskEncoder.build_model(config, q_load_from)
     
     def forward(self, **inputs):
         query = inputs["query"]
@@ -91,13 +97,17 @@ class BiEncoder(nn.Module):
         k_results = self.k_encoder(**passages)
         return {"q_results": q_results, "k_results": k_results}
 
-    def save_model(self, output_dir):
+    def save_models(self, output_dir):
         os.makedirs(output_dir, exist_ok=True)
         self.q_encoder.save_model(os.path.join(output_dir, "q_encoder"))
         self.k_encoder.save_model(os.path.join(output_dir, "k_encoder"))
 
 
-    def load_models(self, q_encoder_path, k_encoder_path):
+    def load_models(self, k_encoder_path=None, q_encoder_path=None):
+        k_encoder_path = k_encoder_path if k_encoder_path is not None else self.k_encoder_path
+        q_encoder_path = q_encoder_path if q_encoder_path is not None else self.q_encoder_path
+        if not (k_encoder_path and q_encoder_path): 
+            print("Missing model path, failed to load.") 
         self.q_encoder.load_model(q_encoder_path)
         self.k_encoder.load_model(k_encoder_path)
 

@@ -8,10 +8,12 @@ sys.path.append(os.path.abspath(os.path.dirname(os.getcwd())))
 import json
 import logging
 import argparse
+import struct
 import csv
 import numpy as np
 import torch
 import lmdb
+from transformers import AutoTokenizer
 from tqdm import tqdm
 import pickle
 from transformers import (
@@ -132,13 +134,59 @@ class TextIdsDatasetLMDBMeta(torch.utils.data.Dataset):
 def loads_data(buf):
     return pickle.loads(buf)
 
+def tokenize_query(args):
+    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name)
+    assert args.save_path is not None
+    if False:
+        with open(args.query_path, "r", encoding="utf-8") as fi, open(args.save_path, "w") as fo:
+            for line in fi:
+                qid, text, lang = line.strip().split('\t')
+                ids = tokenizer.encode(text)
+                fo.write(json.dumps({"qid": qid, "text_ids": ids}) + "\n")
+    if True:
+        with open(args.query_path, "r", encoding="utf-8") as fi, open(args.save_path, "wb") as fo:
+            lines = fi.readlines()
+            fo.write(struct.pack("I", len(lines)))
+            for line in lines:
+                qid, text, lang = line.strip().split('\t')
+                ids = np.array(list(tokenizer.encode(text)), np.int32)
+                fo.write(struct.pack("I I I", int(qid), len(ids), ids.nbytes))
+                fo.write(ids.tobytes())
+
+def pack_gts(args):
+    gt_dict = {}
+    with open(args.gt_path, 'r') as fi:
+        for l in fi:
+            try:
+                l = l.strip().split('\t')
+                qid = int(l[0])
+                if qid in gt_dict:
+                    pass
+                else:
+                    gt_dict[qid] = []
+                gt_dict[qid].append(int(l[2]))
+            except:
+                raise IOError('\"%s\" is not valid format' % l)
+    with open(args.save_path, "wb") as fo:
+        fo.write(struct.pack("I", len(gt_dict)))
+        for k, v in gt_dict.items():
+            arr_v = np.array(v, np.int32)
+            fo.write(struct.pack("I I I", int(k), len(arr_v), arr_v.nbytes))
+            fo.write(arr_v.tobytes())
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--tokenizer_name", type=str, required=False, default="bert-base-multilingual-uncased")
+    parser.add_argument("--query_path", type=str, required=False)
+    parser.add_argument("--gt_path", type=str, required=False)
+    parser.add_argument("--save_path", type=str, required=False)
     parser.add_argument("--passage_path", type=str, default=None)
     parser.add_argument("--max_seq_length", default=128, type=int)
 
     args = parser.parse_args()
-
+    # tokenize_query(args)
+    pack_gts(args)
     # tokenizer = BertTokenizer.from_pretrained('bert-base-multilingual-uncased')
     # tokenizer.save_pretrained('bm25_tokenizer')
 
@@ -148,25 +196,25 @@ if __name__ == "__main__":
 
     # id2id = json.load(open(os.path.join(args.passage_path,'id2id_test.json')))
 
-    passages_train_path = "/datacosmos/local/User/baoht/onesparse2/marcov2/data/lmdb_data/test_ids_lmdb_new"
-    # passages_train_path = "/datacosmos/local/User/baoht/onesparse2/marcov2/data/lmdb_data/train_ids_lmdb"
-    logger.info(f'Loading passages from: {passages_train_path}')
-    doc_pool_env = lmdb.open(passages_train_path, subdir=os.path.isdir(passages_train_path), readonly=True, lock=False, readahead=False, meminit=False)
-    txn = doc_pool_env.begin(write=False)
-    stats = doc_pool_env.stat()
-    print("Number of entries:", stats['entries'])
-    n_passages = loads_data(txn.get(b'__len__'))
-    print("Collection size", n_passages)
+    # passages_train_path = "/datacosmos/local/User/baoht/onesparse2/marcov2/data/lmdb_data/test_ids_lmdb_new"
+    # # passages_train_path = "/datacosmos/local/User/baoht/onesparse2/marcov2/data/lmdb_data/train_ids_lmdb"
+    # logger.info(f'Loading passages from: {passages_train_path}')
+    # doc_pool_env = lmdb.open(passages_train_path, subdir=os.path.isdir(passages_train_path), readonly=True, lock=False, readahead=False, meminit=False)
+    # txn = doc_pool_env.begin(write=False)
+    # stats = doc_pool_env.stat()
+    # print("Number of entries:", stats['entries'])
+    # n_passages = loads_data(txn.get(b'__len__'))
+    # print("Collection size", n_passages)
 
 
-    dataset = TextIdsDatasetLMDBMeta(0, 10000000, txn, args)
-    missings_list = []
-    for idx in tqdm(range(n_passages)):
-        realid, text = dataset[idx]
-        if text == -1:
-            missings_list.append(realid)
-    print(missings_list)
-    print("Missings", len(missings_list))
+    # dataset = TextIdsDatasetLMDBMeta(0, 10000000, txn, args)
+    # missings_list = []
+    # for idx in tqdm(range(n_passages)):
+    #     realid, text = dataset[idx]
+    #     if text == -1:
+    #         missings_list.append(realid)
+    # print(missings_list)
+    # print("Missings", len(missings_list))
     # print(dataset[0])
     # dataset = TextDatasetLMDBMeta(0, n_passages, test_doc_pool_txn, tokenizer, args, id2id)
     # print(dataset[0])
