@@ -61,8 +61,8 @@ def ensamble_init_model():
     qry_model_dicts = {key.split("question_model.")[1]: value for key, value in saved_state.model_dict.items() if key.startswith("question_model.")}
 
     # print("org: ", ctx_model_dicts["embeddings.word_embeddings.weight"])
-    init_k_bert = AutoModel.from_pretrained(model_name, state_dict=qry_model_dicts)
-    init_q_bert = AutoModel.from_pretrained(model_name, state_dict=ctx_model_dicts)
+    init_k_bert = AutoModel.from_pretrained(model_name, state_dict=ctx_model_dicts)
+    init_q_bert = AutoModel.from_pretrained(model_name, state_dict=qry_model_dicts)
     # print("mid: ", init_k_bert.state_dict()["embeddings.word_embeddings.weight"])
     cfg = BertConfig.from_pretrained(model_name)
 
@@ -129,16 +129,27 @@ def load_save_test():
     model_path = "models/init_SimANS_ckpt_36k"
     adhoc_config.encoder_name_or_path = model_path
     be = BiEncoder(adhoc_config)
-    
-    be.load_models()
+    print(be.k_encoder.encoder.shared_encoder.embeddings.state_dict())
+    # be.load_models()
     print("Model loaded")
 
     be.save_models("models/test_save")
     print("Test saved")
 
-    
+def print_dict():
+    model_name =  "google-bert/bert-base-multilingual-uncased"
+    berts_model_path = "/datacosmos/local/User/baoht/onesparse2/marcov2/models/SimANS-checkpoint-36000"
+    saved_state = load_states_from_checkpoint(berts_model_path)
+    # print(saved_state.model_dict.keys())
+
+    ctx_model_dicts = {key.split("ctx_model.")[1]: value for key, value in saved_state.model_dict.items() if key.startswith("ctx_model.")}
+    # print("org: ", ctx_model_dicts["embeddings.word_embeddings.weight"])
+    init_k_bert = AutoModel.from_pretrained(model_name, state_dict=ctx_model_dicts)
+    print(init_k_bert.embeddings.state_dict())
+
+
 if __name__ == "__main__":
     # ensamble_init_model()
     load_save_test()
-
+    # print_dict()
     pass

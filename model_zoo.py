@@ -15,6 +15,10 @@ from transformers import  (
     AutoModelForMaskedLM
     )
 
+from auxiliary import (
+    NullContextManager,
+)
+
 
 class MultiTaskEncoder(nn.Module):
     def __init__(self, 
@@ -25,6 +29,7 @@ class MultiTaskEncoder(nn.Module):
         super(MultiTaskEncoder, self).__init__()
         
         self.encoder = encoder
+        self.fp16 = config.half
         task_list = config.task_list
         task_list = task_list.strip().split(",")
         tasks = [False, False]
@@ -39,24 +44,25 @@ class MultiTaskEncoder(nn.Module):
         self.bert_pooler = BertPooler(config.dense_pooler_type)
 
     def forward(self, **inputs):
-        outputs = self.encoder(**inputs)   # [BS, SEQ_LEN, HID_LEN]
+        with torch.cuda.amp.autocast() if self.fp16 else NullContextManager():
+            outputs = self.encoder(**inputs)   # [BS, SEQ_LEN, HID_LEN]
 
-        dense_last_hidden, sparse_last_hidden = outputs[1], outputs[2]
-        return_dicts = {}
+            dense_last_hidden, sparse_last_hidden = outputs[1], outputs[2]
+            return_dicts = {}
 
-        if self.tasks[0]:
-            bert_pooled = self.bert_pooler(dense_last_hidden, inputs["attention_mask"]) # [BS, HID_LEN]
-            sentence_emb = self.dense_pooler(bert_pooled) if self.use_dense_pooler else bert_pooled  # [BS, HID_LEN]
-            return_dicts["sent_emb"] = sentence_emb
-        if self.tasks[1]:
-            vocab_logits = self.mlm_head(sparse_last_hidden) # [BS, SEQ_LEN, VOCAB_LEN]
-            attention_mask = inputs["attention_mask"].unsqueeze(-1)
-            sparse_last_hidden = sparse_last_hidden * attention_mask
-            vocab_logits = vocab_logits * attention_mask
-            vocab_reps = self.sparse_pooler(vocab_logits, inputs["attention_mask"])
-            
-            return_dicts["vocab_reps"] = vocab_reps
-            return_dicts["sparse_emb"] = self.bert_pooler(sparse_last_hidden, inputs["attention_mask"])
+            if self.tasks[0]:
+                bert_pooled = self.bert_pooler(dense_last_hidden, inputs["attention_mask"]) # [BS, HID_LEN]
+                sentence_emb = self.dense_pooler(bert_pooled) if self.use_dense_pooler else bert_pooled  # [BS, HID_LEN]
+                return_dicts["sent_emb"] = sentence_emb
+            if self.tasks[1]:
+                vocab_logits = self.mlm_head(sparse_last_hidden) # [BS, SEQ_LEN, VOCAB_LEN]
+                attention_mask = inputs["attention_mask"].unsqueeze(-1)
+                sparse_last_hidden = sparse_last_hidden * attention_mask
+                vocab_logits = vocab_logits * attention_mask
+                vocab_reps = self.sparse_pooler(vocab_logits, inputs["attention_mask"])
+                
+                return_dicts["vocab_reps"] = vocab_reps
+                return_dicts["sparse_emb"] = self.bert_pooler(sparse_last_hidden, inputs["attention_mask"])
     
         return return_dicts
 
@@ -66,14 +72,9 @@ class MultiTaskEncoder(nn.Module):
         if self.mlm_head is not None:
             torch.save(self.mlm_head.state_dict(), os.path.join(output_dir, "mlm_head.pth"))
 
-    def load_model(self, output_dir):
-        self.encoder.load_pretrained(output_dir)
-        if self.mlm_head is not None:
-            self.mlm_head.load_state_dict(torch.load(os.path.join(output_dir, "mlm_head.pth")))
-
     @classmethod
     def build_model(cls, config, load_name_or_path):
-        encoder = MultiTaskBert.from_pretrained(load_name_or_path)
+        encoder = MultiTaskBert.load_pretrained(load_name_or_path)
         mlm_head = MLMHead(config.hidden_size, config.vocab_size)
         return cls(config, encoder, mlm_head)
 
@@ -82,7 +83,7 @@ class BiEncoder(nn.Module):
     def __init__(self, config):
         super(BiEncoder, self).__init__()
         encoder_name_or_path = config.encoder_name_or_path
-        if not os.path.exists(encoder_name_or_path) or config.share_encoder:
+        if not os.path.exists(encoder_name_or_path) or config.use_shared_encoder:
             k_load_from = q_load_from = encoder_name_or_path
         else:
             k_load_from, q_load_from = os.path.join(encoder_name_or_path, "k_encoder"), os.path.join(encoder_name_or_path, "q_encoder")
@@ -253,3 +254,8 @@ class MultiTaskBert(BertPreTrainedModel):
         """
         return hidden_state_list
 
+    @classmethod
+    def load_pretrained(cls, model_path, **kwargs):
+        config = MultiTaskBertConfig.from_pretrained(model_path)
+        model = cls.from_pretrained(model_path, config=config, **kwargs)
+        return model

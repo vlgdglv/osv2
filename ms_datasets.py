@@ -89,10 +89,8 @@ def load_passages_lmdb(args):
 
     logger.info(f'Loading passages from: {passages_train_path}')
     doc_pool_env = lmdb.open(passages_train_path, subdir=os.path.isdir(passages_train_path), readonly=True, lock=False, readahead=False, meminit=False)
-
     logger.info(f'Loading passages from: {passages_test_path}')
     doc_pool_env_test = lmdb.open(passages_test_path, subdir=os.path.isdir(passages_test_path), readonly=True, lock=False, readahead=False, meminit=False)
-
     return doc_pool_env.begin(write=False), doc_pool_env_test.begin(write=False)
 
 
@@ -129,6 +127,8 @@ class TextIdsDatasetLMDBMeta(torch.utils.data.Dataset):
             doc_tensor = torch.LongTensor(d_list)
             return index_list, doc_tensor, (doc_tensor != 0).long()
         return create_passage_input
+
+
 
 
 def loads_data(buf):
