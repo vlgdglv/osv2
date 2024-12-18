@@ -1,8 +1,15 @@
 export NCCL_DEBUG=WARN
-BASE_DIR=/datacosmos/local/User/baoht/onesparse2/marcov2/
+# export HIP_VISIBLE_DEVICES=0,1  # 根据你的 GPU 设置
+# export NCCL_DEBUG=INFO
+export ROCM_LOG_LEVEL=5   
+
+# BASE_DIR=/datacosmos/local/User/baoht/onesparse2/marcov2/
+BASE_DIR=/datacosmos/User/baoht/onesparse2/marcov2/
+
 TRAIN_NAME=warmup_splade
 train(){
-    CUDA_VISIBLE_DEVICES=1,2,3,4 python -m torch.distributed.launch --nproc_per_node=4 \
+    # python -m torch.distributed.launch --nproc_per_node=16 \
+    torchrun --nproc_per_node=16 \
         train_tasks.py \
         --in_train True \
         --output_dir runs/marcows/ \
@@ -15,11 +22,11 @@ train(){
         --train_example_dirs $BASE_DIR/data/training_data/training_mid \
         --passage_lmdb_dir $BASE_DIR/data/lmdb_data/train_ids_lmdb \
         --query_lmdb_dir $BASE_DIR/data/lmdb_data/train_queries \
-        --save_steps 10000 \
-        --learning_rate 1e-5 \
+        --save_steps 2500 \
+        --learning_rate 5e-6 \
         --num_train_epochs 1 \
         --num_neg 7 \
-        --per_device_train_batch_size 8 \
+        --per_device_train_batch_size 16 \
         --dataloader_num_workers 32 \
         --logging_steps 100 \
         --warmup_ratio 0.1 \

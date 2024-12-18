@@ -2,10 +2,11 @@ import os
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+import lmdb
 import numba.typed
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 import pickle
 import numba
@@ -14,19 +15,20 @@ import numpy as np
 import logging
 from collections import defaultdict
 
+from dataclasses import dataclass
 import logging
 
 
 
 from transformers import (
-    AutoTokenizer,
+    AutoTokenizer, PreTrainedTokenizer,
     HfArgumentParser,
-    set_seed,
+    DataCollatorWithPadding
 )
 
 
 logger = logging.getLogger(__name__)
-
+from model_zoo import BiEncoder
 from tqdm import tqdm
 from inverted_index import InvertedIndex
 from auxiliary import (
@@ -36,6 +38,53 @@ from auxiliary import (
     EvaluationConfig
 )
 logger = logging.getLogger(__name__)
+
+
+
+class MARCOWSTestIdsDataset(Dataset):
+    def __init__(self, passage_lmdb_dir, tokenizer, idmapping_path=None, max_length=128):
+        
+        self.passage_lmdb_env = lmdb.open(passage_lmdb_dir, subdir=os.path.isdir(passage_lmdb_dir), readonly=True, lock=False,
+                                 readahead=False, meminit=False)
+        with self.passage_lmdb_env.begin(write=False) as txn:
+            self.length = pickle.loads(txn.get(b'__len__'))
+        if idmapping_path:
+            self.idmapping = json.load(open(idmapping_path))
+            self.mapper = lambda x: self.idmapping[str(x)]
+        else:
+            self.mapper = lambda x: x
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, index):
+        real_index = str(self.mapper(index))
+        with self.passage_lmdb_env.begin(write=False) as doc_pool_txn:
+            text_ids = pickle.loads(doc_pool_txn.get(real_index.encode()))
+        encoded_text = self.tokenizer.prepare_for_model(
+            text_ids,
+            max_length=self.max_length,
+            truncation=True,
+            return_token_type_ids=False,
+            return_attention_mask=False,
+            add_special_tokens=True
+        )
+        return real_index, encoded_text
+
+
+@dataclass
+class PredictionCollator(DataCollatorWithPadding):
+    is_query: bool = False
+    q_max_len: int = 32
+    k_max_len: int = 128
+    def __call__(self, features):
+        text_ids, encode_texts = [f[0] for f in features], [f[1] for f in features]
+        collated_texts = super().__call__(encode_texts)
+        return text_ids, collated_texts
+
 
 class Evalutator:
     def __init__(self, model, config=None):
@@ -55,12 +104,13 @@ class SparseIndex(Evalutator):
         super().__init__(model, config)
         self.index_dir = config.index_dir if config is not None else None
         self.index_filename = config.index_filename
-        self.invert_index = InvertedIndex(self.index_dir, config.index_filename, voc_dim=config.vocab_size, force_new=config.force_build_index)
+        self.invert_index = InvertedIndex(self.index_dir, config.index_filename, force_rebuild=config.force_build_index)
         self.kterm_num = config.kterm_num
 
     def index(self, corpus_loader):
         doc_ids = []
         row_count = 0
+        assert self.index_dir is not None
         with torch.no_grad():
             for batch in tqdm(corpus_loader):
                 
@@ -78,16 +128,12 @@ class SparseIndex(Evalutator):
 
                 row_count += outputs.size(0)
                 doc_ids.extend(text_id)
-                self.invert_index.add_batch_document(rows, 
-                                                     doc_dim.view(-1).cpu().numpy(), 
-                                                     values.view(-1).cpu().numpy(), 
-                                                     len(text_id))
+                self.invert_index.add_batch_item(rows, doc_dim.view(-1).cpu().numpy(), values.view(-1).cpu().numpy())
     
 
-        if self.index_dir is not None:
-            self.invert_index.save()
-            pickle.dump(doc_ids, open(os.path.join(self.index_dir, "doc_ids_{}.pkl".format(self.index_filename)), "wb"))
-            logger.info("Index saved at {}".format(self.index_dir))
+        self.invert_index.save()
+        pickle.dump(doc_ids, open(os.path.join(self.index_dir, "doc_ids_{}.pkl".format(self.index_filename)), "wb"))
+        logger.info("Index saved at {}".format(self.index_dir))
 
 
 class SparseRetriever(Evalutator):
@@ -102,7 +148,7 @@ class SparseRetriever(Evalutator):
         if config.do_query_encode:
             return
         
-        self.invert_index = InvertedIndex(config.index_dir, config.index_filename, voc_dim=config.vocab_size)
+        self.invert_index = InvertedIndex(config.index_dir, config.index_filename)
         self.doc_ids = pickle.load(open(os.path.join(config.index_dir, "doc_ids_{}.pkl".format(config.index_filename)), "rb"))
         
         self.numba_index_doc_ids = numba.typed.Dict()
@@ -223,7 +269,7 @@ def splade_eval():
     logger.info("MODEL parameters %s", model_config)
     
     tokenizer = AutoTokenizer.from_pretrained(
-        model_config.tokenizer_name if model_config.tokenizer_name else model_config.model_name_or_path,
+        model_config.tokenizer_name,
         cache_dir=model_config.model_cache_dir 
     )
     model_config.vocab_size = len(tokenizer)
@@ -233,14 +279,17 @@ def splade_eval():
     # if model_config.sparse_shared_encoder:
     #     model = SparseSharedEncoder.build_model(model_config)
     # else:
-    model = None
+    full_model = BiEncoder(model_config)
+    model = full_model.k_encoder
     
     logger.info("Model loaded.")
 
     if eval_config.do_corpus_index:
         logger.info("--------------------- CORPUS INDEX PROCEDURE ---------------------")
         is_query = False
-        corpus_dataset = PredictionDataset(data_config, tokenizer, is_query=is_query)
+        corpus_dataset = MARCOWSTestIdsDataset(data_config.passage_lmdb_dir, tokenizer, 
+                                               idmapping_path=data_config.idmapping_path, 
+                                               max_length=data_config.k_max_len)
         
         corpus_loader = DataLoader(
             corpus_dataset,
@@ -248,7 +297,6 @@ def splade_eval():
             collate_fn=PredictionCollator(
                 tokenizer=tokenizer,
                 max_length=data_config.k_max_len,
-                is_query=is_query
             ),
             num_workers=eval_config.dataloader_num_workers,
             pin_memory=True,
@@ -265,7 +313,9 @@ def splade_eval():
         logger.info("--------------------- RETRIEVAL PROCEDURE ---------------------")
         is_query = True
 
-        query_dataset = PredictionDataset(data_config, tokenizer, is_query=is_query)
+        query_dataset = MARCOWSTestIdsDataset(data_config.passage_lmdb_dir, tokenizer, 
+                                               idmapping_path=data_config.idmapping_path, 
+                                               max_length=data_config.q_max_len)
         
         query_loader = DataLoader(
             query_dataset,
@@ -294,7 +344,9 @@ def splade_eval():
         logger.info("--------------------- QUERY ENCODE PROCEDURE ---------------------")
         is_query = True
 
-        query_dataset = PredictionDataset(data_config, tokenizer, is_query=is_query)
+        query_dataset = MARCOWSTestIdsDataset(data_config.passage_lmdb_dir, tokenizer, 
+                                               idmapping_path=data_config.idmapping_path, 
+                                               max_length=data_config.q_max_len)
         
         query_loader = DataLoader(
             query_dataset,

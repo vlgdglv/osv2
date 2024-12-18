@@ -103,7 +103,8 @@ class DataConfig:
     train_example_dirs: str = field(default=None)
     passage_lmdb_dir: str = field(default=None)
     query_lmdb_dir: str = field(default=None)
-
+    idmapping_path: str = field(default=None)
+    
     train_dir: str = field(default=None, metadata={"help": "Path to train directory"})
     dataset_name: str = field(default="json", metadata={"help": "huggingface dataset name"})
     dataset_split: str = field(default='train', metadata={"help": "dataset split"})

@@ -53,7 +53,9 @@ def ensamble_init_model():
     adhoc_config = VeryTemporaryConfig
     model_name =  "google-bert/bert-base-multilingual-uncased"
     
-    berts_model_path = "/datacosmos/local/User/baoht/onesparse2/marcov2/models/SimANS-checkpoint-36000"
+    berts_model_path = "/datacosmos/User/baoht/onesparse2/marcov2/models/SimANS-checkpoint-36000"
+    # berts_model_path = "/datacosmos/local/User/baoht/onesparse2/marcov2/models/SimANS-checkpoint-36000"
+    
     saved_state = load_states_from_checkpoint(berts_model_path)
     # print(saved_state.model_dict.keys())
 
@@ -149,7 +151,7 @@ def print_dict():
 
 
 if __name__ == "__main__":
-    # ensamble_init_model()
-    load_save_test()
+    ensamble_init_model()
+    # load_save_test()
     # print_dict()
     pass

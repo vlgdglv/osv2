@@ -287,7 +287,7 @@ class MultiTaskTrainer(Trainer):
         output_dir = output_dir if output_dir is not None else self.args.output_dir
         os.makedirs(output_dir, exist_ok=True)
         logger.info("Saving model checkpoint to %s", output_dir)
-        self.model.save_model(output_dir)   
+        self.model.save_models(output_dir)   
 
 
 def main():
