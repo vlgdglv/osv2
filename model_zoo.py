@@ -19,6 +19,8 @@ from auxiliary import (
     NullContextManager,
 )
 
+import logging
+logger = logging.getLogger(__name__)
 
 class MultiTaskEncoder(nn.Module):
     def __init__(self, 
@@ -76,6 +78,10 @@ class MultiTaskEncoder(nn.Module):
     def build_model(cls, config, load_name_or_path):
         encoder = MultiTaskBert.load_pretrained(load_name_or_path)
         mlm_head = MLMHead(config.hidden_size, config.vocab_size)
+        if os.path.exists(os.path.join(load_name_or_path, "mlm_head.pth")):
+            mlm_head.load_state_dict(torch.load(os.path.join(load_name_or_path, "mlm_head.pth")))
+        else:
+            logger.warning("MLM head not found in: %s", load_name_or_path)
         return cls(config, encoder, mlm_head)
 
 
@@ -87,10 +93,11 @@ class BiEncoder(nn.Module):
             k_load_from = q_load_from = encoder_name_or_path
         else:
             k_load_from, q_load_from = os.path.join(encoder_name_or_path, "k_encoder"), os.path.join(encoder_name_or_path, "q_encoder")
+            logger.info("Load k encoder from: {}, q encoder from {}.".format(k_load_from, q_load_from))
             self.k_encoder_path, self.q_encoder_path = k_load_from, q_load_from
         self.k_encoder = MultiTaskEncoder.build_model(config, k_load_from)
         self.q_encoder = MultiTaskEncoder.build_model(config, q_load_from)
-    
+
     def forward(self, **inputs):
         query = inputs["query"]
         passages = inputs["passages"]
@@ -108,7 +115,7 @@ class BiEncoder(nn.Module):
         k_encoder_path = k_encoder_path if k_encoder_path is not None else self.k_encoder_path
         q_encoder_path = q_encoder_path if q_encoder_path is not None else self.q_encoder_path
         if not (k_encoder_path and q_encoder_path): 
-            print("Missing model path, failed to load.") 
+            logger.warning("Missing model path, failed to load.") 
         self.q_encoder.load_model(q_encoder_path)
         self.k_encoder.load_model(k_encoder_path)
 
@@ -117,6 +124,10 @@ class SparsePooler(nn.Module):
     def __init__(self, config):
         super(SparsePooler, self).__init__()
         self.pooler_type = config.sparse_pooler_type
+        if config.vocab_weight_path is not None:
+            self.vocab_weight = torch.load(config.vocab_weight_path)
+        else:
+            self.vocab_weight = None
 
     def forward(self, logits, attention_mask):
         saturated = torch.log(1 + torch.relu(logits)) * attention_mask.unsqueeze(-1)
@@ -126,6 +137,8 @@ class SparsePooler(nn.Module):
             pooled, _ = torch.max(saturated, dim=1)
         elif self.pooler_type == "mean":
             pooled = torch.mean(saturated, dim=1)
+        if self.vocab_weight is not None:
+            pooled = pooled * self.vocab_weight.to(pooled.device)
         return pooled
 
 

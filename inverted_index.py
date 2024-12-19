@@ -21,7 +21,7 @@ class InvertedIndex:
                  index_path=None, 
                  file_name="array_index.h5py",
                  force_rebuild=False,
-                 ignore_keys=False, 
+                 ignore_keys=True, 
                  ignore_token_before=173):
         os.makedirs(index_path, exist_ok=True)
         

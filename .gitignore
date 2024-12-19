@@ -6,6 +6,8 @@ dataset/data/
 *.fbin
 *.pt
 **/embeddings/
+**/splade_index/
+**/splade_results/
 **/assets/
 dense_tower/coCondensor-nq/
 dense_tower/coCondenser-marco/

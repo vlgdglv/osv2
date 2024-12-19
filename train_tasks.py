@@ -384,3 +384,8 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # base_dir = "/datacosmos/User/baoht/onesparse2/marcov2/"
+    # dataset = MARCOWSDataset(train_example_dirs=base_dir+"data/training_data/training_mid", 
+    #                          passage_lmdb_dir=base_dir+"data/lmdb_data/train_ids_lmdb", 
+    #                          query_lmdb_dir=base_dir+"data/lmdb_data/train_queries")
+    # dataset[0]

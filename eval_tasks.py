@@ -32,7 +32,7 @@ from model_zoo import BiEncoder
 from tqdm import tqdm
 from inverted_index import InvertedIndex
 from auxiliary import (
-    to_device,
+    to_device, load_gt, compute_metrics,
     DataConfig, 
     ModelConfig, 
     EvaluationConfig
@@ -42,26 +42,26 @@ logger = logging.getLogger(__name__)
 
 
 class MARCOWSTestIdsDataset(Dataset):
-    def __init__(self, passage_lmdb_dir, tokenizer, idmapping_path=None, max_length=128):
-        
-        self.passage_lmdb_env = lmdb.open(passage_lmdb_dir, subdir=os.path.isdir(passage_lmdb_dir), readonly=True, lock=False,
-                                 readahead=False, meminit=False)
-        with self.passage_lmdb_env.begin(write=False) as txn:
-            self.length = pickle.loads(txn.get(b'__len__'))
-        if idmapping_path:
-            self.idmapping = json.load(open(idmapping_path))
+    def __init__(self, passage_lmdb_env, tokenizer, 
+                 start_idx=0, end_idx=-1,
+                 idmapping=None, max_length=128):
+        self.passage_lmdb_env = passage_lmdb_env 
+        self.start = start_idx
+        self.end = end_idx
+        self.length = self.end - self.start
+        if idmapping:
+            self.idmapping = idmapping
             self.mapper = lambda x: self.idmapping[str(x)]
         else:
-            self.mapper = lambda x: x
+            self.mapper = lambda x: x+1
         self.tokenizer = tokenizer
         self.max_length = max_length
-
 
     def __len__(self):
         return self.length
 
     def __getitem__(self, index):
-        real_index = str(self.mapper(index))
+        real_index = str(self.mapper(self.start + index))
         with self.passage_lmdb_env.begin(write=False) as doc_pool_txn:
             text_ids = pickle.loads(doc_pool_txn.get(real_index.encode()))
         encoded_text = self.tokenizer.prepare_for_model(
@@ -91,7 +91,7 @@ class Evalutator:
         self.config = config
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.gpu_num = torch.cuda.device_count()
-        print("GPU count: {}".format(self.gpu_num))
+        logger.info("GPU count: {}".format(self.gpu_num))
         model.to(self.device)
         
         if self.device == torch.device("cuda") and self.gpu_num > 1:
@@ -100,9 +100,9 @@ class Evalutator:
         self.model = model
 
 class SparseIndex(Evalutator):
-    def __init__(self, model, config):
+    def __init__(self, model, index_dir, config):
         super().__init__(model, config)
-        self.index_dir = config.index_dir if config is not None else None
+        self.index_dir = index_dir
         self.index_filename = config.index_filename
         self.invert_index = InvertedIndex(self.index_dir, config.index_filename, force_rebuild=config.force_build_index)
         self.kterm_num = config.kterm_num
@@ -137,7 +137,7 @@ class SparseIndex(Evalutator):
 
 
 class SparseRetriever(Evalutator):
-    def __init__(self, model, config):
+    def __init__(self, model, index_dir, config):
         super().__init__(model, config)
 
         self.output_dir = config.retrieve_result_output_dir
@@ -148,19 +148,20 @@ class SparseRetriever(Evalutator):
         if config.do_query_encode:
             return
         
-        self.invert_index = InvertedIndex(config.index_dir, config.index_filename)
-        self.doc_ids = pickle.load(open(os.path.join(config.index_dir, "doc_ids_{}.pkl".format(config.index_filename)), "rb"))
+        self.invert_index = InvertedIndex(index_dir, config.index_filename)
+        self.doc_ids = pickle.load(open(os.path.join(index_dir, "doc_ids_{}.pkl".format(config.index_filename)), "rb"))
         
         self.numba_index_doc_ids = numba.typed.Dict()
         self.numba_index_doc_values = numba.typed.Dict()
 
-        for k, v in self.invert_index.index_doc_id.items():
+        for k, v in self.invert_index.index_ids.items():
             self.numba_index_doc_ids[k] = v
-        for k, v in self.invert_index.index_doc_value.items():
+        for k, v in self.invert_index.index_values.items():
             self.numba_index_doc_values[k] = v
-        
-    def retrieve_from_json(self, query_path, top_k=200, threshold=0):
-        res = defaultdict(dict)
+        # 5087696
+        # 20214074
+    def retrieve_from_json(self, query_path, top_k=100, threshold=0):
+        res = {}
         with open(query_path, "r") as f:
             for line in tqdm(f):
                 query = json.loads(line.strip())
@@ -170,13 +171,15 @@ class SparseRetriever(Evalutator):
                                                     np.array(query["value"]),
                                                     threshold,
                                                     self.invert_index.total_docs)
-                indices, scores = self.select_topk(indices, scores, k=top_k)    
-                for idx, sc in zip(indices, scores):
-                    res[str(query["text_id"])][str(self.doc_ids[idx])] = float(sc)   
+                indices, scores = self.select_topk(indices, scores, k=top_k)
+                print(indices)
+                indices = np.array([int(self.doc_ids[i]) for i in indices])
+                print(indices)
+                res[int(query["text_id"])] = [indices, scores]  
         return res
     
-    def retrieve(self, query_loader, top_k=200, threshold=0):
-        res = defaultdict(dict)
+    def retrieve(self, query_loader, top_k=100, threshold=0):
+        res = {}
         with torch.no_grad():
             for batch in tqdm(query_loader):
 
@@ -196,10 +199,11 @@ class SparseRetriever(Evalutator):
                                                     threshold,
                                                     self.invert_index.total_docs)
                 indices, scores = self.select_topk(indices, scores, k=top_k)    
-                for idx, sc in zip(indices, scores):
-                    res[str(query_id[0])][str(self.doc_ids[idx])] = float(sc)   
-        with open(os.path.join(self.output_dir, "result.json"), "w") as f:
-            json.dump(res, f)
+                # for idx, sc in zip(indices, scores):
+                #     res[str(query_id[0])][str(self.doc_ids[idx])] = float(sc)   
+                res[int(query_id[0])] = [indices, scores]
+        # with open(os.path.join(self.output_dir, "result.json"), "w") as f:
+        #     json.dump(res, f)
         return res
 
     def save_encode(self, model, query_loader, output_path):
@@ -218,7 +222,6 @@ class SparseRetriever(Evalutator):
                     row, doc_dim = torch.nonzero(outputs, as_tuple=True)
                     values = outputs[row.detach().cpu().tolist(), doc_dim.detach().cpu().tolist()]
                 doc_dim, values = doc_dim.view(-1).detach().cpu().numpy(), values.view(-1).detach().cpu().numpy()
-                # json_list.append({"text_id": int(query_id[0]), "text": doc_dim.tolist(), "value": values.tolist()})
                 f.write(json.dumps({"text_id": int(query_id[0]), "text": doc_dim.tolist(), "value": values.tolist()}) + "\n")            
                 
     @staticmethod
@@ -233,8 +236,11 @@ class SparseRetriever(Evalutator):
         N = len(query_indices)
         for i in range(N):
             query_index, query_value = query_indices[i], query_values[i]
-            retrieved_indice = invert_index_ids[query_index]
-            retrieved_values = invert_index_values[query_index]
+            try:
+                retrieved_indice = invert_index_ids[query_index]
+                retrieved_values = invert_index_values[query_index]
+            except:
+                continue
             for j in numba.prange(len(retrieved_indice)):
                 scores[retrieved_indice[j]] += query_value * retrieved_values[j]
         filtered_indices = np.argwhere(scores > threshold)[:, 0]
@@ -280,43 +286,67 @@ def splade_eval():
     #     model = SparseSharedEncoder.build_model(model_config)
     # else:
     full_model = BiEncoder(model_config)
-    model = full_model.k_encoder
+    
     
     logger.info("Model loaded.")
 
     if eval_config.do_corpus_index:
-        logger.info("--------------------- CORPUS INDEX PROCEDURE ---------------------")
-        is_query = False
-        corpus_dataset = MARCOWSTestIdsDataset(data_config.passage_lmdb_dir, tokenizer, 
-                                               idmapping_path=data_config.idmapping_path, 
-                                               max_length=data_config.k_max_len)
         
-        corpus_loader = DataLoader(
-            corpus_dataset,
-            batch_size=eval_config.per_device_eval_batch_size * torch.cuda.device_count(),
-            collate_fn=PredictionCollator(
-                tokenizer=tokenizer,
-                max_length=data_config.k_max_len,
-            ),
-            num_workers=eval_config.dataloader_num_workers,
-            pin_memory=True,
-            persistent_workers=True
-        )
+        is_query = False
+        logger.info("--------------------- CORPUS INDEX PROCEDURE ---------------------")
+        passage_lmdb_env = lmdb.open(data_config.passage_lmdb_dir, subdir=os.path.isdir(data_config.passage_lmdb_dir), readonly=True, lock=False,
+                                 readahead=False, meminit=False)
+        id_mapper = json.load(open(data_config.idmapping_path))
 
-        indexer = SparseIndex(
-            model,
-            eval_config
-        )
-        indexer.index(corpus_loader)
+        with passage_lmdb_env.begin(write=False) as txn:
+            n_passages = pickle.loads(txn.get(b'__len__'))
+        shards_num = eval_config.shards_num
+        assert shards_num > 0
+        shard_size = n_passages // shards_num
+        
+        for shard_id in range(shards_num):
+            start_idx = shard_id * shard_size
+            end_idx = start_idx + shard_size
+            if shard_id == shards_num - 1:
+                end_idx = n_passages
+            logger.info(f"Indexing shard {shard_id} from {start_idx} to {end_idx}")
+
+            corpus_dataset = MARCOWSTestIdsDataset(passage_lmdb_env, tokenizer, 
+                                                start_idx=start_idx, end_idx=end_idx,
+                                                idmapping=id_mapper,
+                                                max_length=data_config.k_max_len)
+            logger.info(f"Dataset size: {len(corpus_dataset)}")
+            corpus_loader = DataLoader(
+                corpus_dataset,
+                batch_size=eval_config.per_device_eval_batch_size * torch.cuda.device_count(),
+                collate_fn=PredictionCollator(
+                    tokenizer=tokenizer,
+                    max_length=data_config.k_max_len,
+                ),
+                num_workers=eval_config.dataloader_num_workers,
+                pin_memory=True,
+                persistent_workers=True
+            )
+            model = full_model.k_encoder
+            indexer = SparseIndex(
+                model,
+                os.path.join(eval_config.index_dir, f"shard_{shard_id}"),
+                eval_config
+            )
+            indexer.index(corpus_loader)
         
     if eval_config.do_retrieve:
         logger.info("--------------------- RETRIEVAL PROCEDURE ---------------------")
         is_query = True
 
-        query_dataset = MARCOWSTestIdsDataset(data_config.passage_lmdb_dir, tokenizer, 
-                                               idmapping_path=data_config.idmapping_path, 
+        query_lmdb_env = lmdb.open(data_config.query_lmdb_dir, subdir=os.path.isdir(data_config.query_lmdb_dir), readonly=True, lock=False,
+                                 readahead=False, meminit=False)
+        with query_lmdb_env.begin(write=False) as txn:
+            n_query = pickle.loads(txn.get(b'__len__'))
+
+        query_dataset = MARCOWSTestIdsDataset(query_lmdb_env, tokenizer,
+                                               start_idx=0, end_idx=n_query,
                                                max_length=data_config.q_max_len)
-        
         query_loader = DataLoader(
             query_dataset,
             batch_size=1, # just one at a time for now
@@ -329,28 +359,60 @@ def splade_eval():
             pin_memory=True,
             persistent_workers=True
         )
+        
+        model = full_model.q_encoder
+        shards_num = eval_config.shards_num
+        assert shards_num > 0
+        model = full_model.q_encoder
+        
+        res_full = {}
+        for shard_id in range(shards_num):
+            logger.info(f"Searching in shard {shard_id}")
+            retriever = SparseRetriever(
+                model,
+                os.path.join(eval_config.index_dir, f"shard_{shard_id}"),
+                eval_config
+            )
+            res = retriever.retrieve(query_loader, top_k=eval_config.retrieve_topk)
+            for k, v in res.items():
+                if shard_id == 0:
+                    res_full[k] = v
+                else:
+                    res_full[k][0] = np.concatenate((res_full[k][0], v[0]), axis=0) # Indices
+                    res_full[k][1] = np.concatenate((res_full[k][1], v[1]), axis=0) # Scores
 
-        retriever = SparseRetriever(
-            model,
-            eval_config
-        )
-        res = retriever.retrieve(query_loader, top_k=eval_config.retrieve_topk)
-        if eval_config.save_ranking:
-            save_name = eval_config.save_name if eval_config.save_name is not None else "splade_rank.pkl" 
-            with open(os.path.join(eval_config.retrieve_result_output_dir, save_name), 'wb') as f:
-                pickle.dump(res, f)
+        top_k = eval_config.retrieve_topk
+        for k, v in tqdm(res_full.items(), total=len(res_full), desc="Select topk"):
+            indices, scores = v
+            indices, scores = retriever.select_topk(indices, scores, k=top_k)
+            res_full[int(k)] = indices, scores
+
+        if eval_config.eval_gt_path:
+            eval_result = compute_metrics(load_gt(eval_config.eval_gt_path), res_full)
+            print(eval_result)
+        else:
+            os.makedirs(eval_config.retrieve_result_output_dir, exist_ok=True)
+            save_ranking_path = os.path.join(eval_config.retrieve_result_output_dir, "splade_ranking.pkl")
+            logger.info("No qrels file, save result to: {}".format(save_ranking_path))
+            with open(save_ranking_path, 'wb') as f:
+                pickle.dump(res_full, f)
+
        
     if eval_config.do_query_encode:
         logger.info("--------------------- QUERY ENCODE PROCEDURE ---------------------")
         is_query = True
+        query_lmdb_env = lmdb.open(data_config.query_lmdb_dir, subdir=os.path.isdir(data_config.query_lmdb_dir), readonly=True, lock=False,
+                                 readahead=False, meminit=False)
+        with query_lmdb_env.begin(write=False) as txn:
+            n_query = pickle.loads(txn.get(b'__len__'))
 
-        query_dataset = MARCOWSTestIdsDataset(data_config.passage_lmdb_dir, tokenizer, 
-                                               idmapping_path=data_config.idmapping_path, 
+        query_dataset = MARCOWSTestIdsDataset(query_lmdb_env, tokenizer,
+                                               start_idx=0, end_idx=n_query,
                                                max_length=data_config.q_max_len)
         
         query_loader = DataLoader(
             query_dataset,
-            batch_size=1, #eval_config.per_device_eval_batch_size * torch.cuda.device_count(), # just one at a time for now
+            batch_size=1, # eval_config.per_device_eval_batch_size * torch.cuda.device_count(), # just one at a time for now
             collate_fn=PredictionCollator(
                 tokenizer=tokenizer,
                 max_length=data_config.q_max_len,
@@ -360,7 +422,8 @@ def splade_eval():
             pin_memory=True,
             persistent_workers=True
         )
-
+        
+        model = full_model.q_encoder
         retriever = SparseRetriever(
             model,
             eval_config
@@ -374,11 +437,43 @@ def splade_eval():
         res = retriever.save_encode(model, query_loader, os.path.join(eval_config.index_dir, eval_config.save_name))
 
     if eval_config.do_retrieve_from_json: 
-        retriever = SparseRetriever(
-            model,
-            eval_config
-        )
-        res = retriever.retrieve_from_json(eval_config.query_json_path, top_k=eval_config.retrieve_topk)
+        logger.info("--------------------- RETRIEVAL FROM JSON PROCEDURE ---------------------")
+        shards_num = eval_config.shards_num
+        assert shards_num > 0
+        model = full_model.q_encoder
+        
+        res_full = {}
+        for shard_id in range(shards_num):
+            logger.info(f"Searching in shard {shard_id}")
+            retriever = SparseRetriever(
+                model,
+                os.path.join(eval_config.index_dir, f"shard_{shard_id}") ,
+                eval_config
+            )
+            res = retriever.retrieve_from_json(eval_config.query_json_path, top_k=eval_config.retrieve_topk)
+            for k, v in res.items():
+                if shard_id == 0:
+                    res_full[k] = v
+                else:
+                    res_full[k][0] = np.concatenate((res_full[k][0], v[0]), axis=0) # Indices
+                    res_full[k][1] = np.concatenate((res_full[k][1], v[1]), axis=0) # Scores
+
+        top_k = eval_config.retrieve_topk
+        for k, v in tqdm(res_full.items(), total=len(res_full), desc="Select topk"):
+            indices, scores = v
+            indices, scores = retriever.select_topk(indices, scores, k=top_k)
+            res_full[int(k)] = indices, scores
+            
+
+        if eval_config.eval_gt_path:
+            eval_result = compute_metrics(load_gt(eval_config.eval_gt_path), res_full)
+            print(eval_result)
+        else:
+            os.makedirs(eval_config.retrieve_result_output_dir, exist_ok=True)
+            save_ranking_path = os.path.join(eval_config.retrieve_result_output_dir, "splade_ranking.pkl")
+            logger.info("No qrels file, save result to: {}".format(save_ranking_path))
+            with open(save_ranking_path, 'wb') as f:
+                pickle.dump(res_full, f)
 
 
 if __name__ == "__main__":

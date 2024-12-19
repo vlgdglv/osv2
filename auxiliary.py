@@ -12,6 +12,92 @@ from torch import distributed as dist
 
 from typing import Dict, List, Any, Union, Mapping
 
+def load_gt(gt_path):
+    qids_to_relevant_passageids = {}
+    with open(gt_path, 'r') as f:
+        for l in f:
+            try:
+                l = l.strip().split('\t')
+                qid = int(l[0])
+                if qid in qids_to_relevant_passageids:
+                    pass
+                else:
+                    qids_to_relevant_passageids[qid] = []
+                qids_to_relevant_passageids[qid].append(int(l[2]))
+            except:
+                raise IOError('\"%s\" is not valid format' % l)
+    return qids_to_relevant_passageids
+
+
+def compute_metrics(gt_dict, qids_to_ranked_candidate_passages):
+    """Compute MRR metric
+    Args:
+    gt_dict (dict): dictionary of query-passage mapping
+        Dict as read in with load_reference or load_reference_from_stream
+    p_qids_to_ranked_candidate_passages (dict): dictionary of query-passage candidates
+    Returns:
+        dict: dictionary of metrics {'MRR': <MRR Score>}
+    """
+    MaxMRRRank = 10
+    all_scores = {}
+    MRR = 0
+    qids_with_relevant_passages = 0
+    ranking = []
+    recall_q_top1 = set()
+    recall_q_top5 = set()
+    recall_q_top10 = set()
+    recall_q_top20 = set()
+    recall_q_top100 = set()
+    recall_q_all = set()
+
+    for qid in qids_to_ranked_candidate_passages:
+        if qid in gt_dict:
+            ranking.append(0)
+            target_pid = gt_dict[qid]
+            candidate_pid, _ = qids_to_ranked_candidate_passages[qid]
+            if len(candidate_pid) == 0:
+                continue
+            for i in range(0, MaxMRRRank):
+                if candidate_pid[i] in target_pid:
+                    MRR += 1.0 / (i + 1)
+                    ranking.pop()
+                    ranking.append(i + 1)
+                    break
+            for i, pid in enumerate(candidate_pid):
+                if pid in target_pid:
+                    recall_q_all.add(qid)
+                    if i < 100:
+                        recall_q_top100.add(qid)
+                    if i < 5:
+                        recall_q_top5.add(qid)
+                    if i < 10:
+                        recall_q_top10.add(qid)
+                    if i < 20:
+                        recall_q_top20.add(qid)
+                    if i == 0:
+                        recall_q_top1.add(qid)
+                    break
+    if len(ranking) == 0:
+        raise IOError("No matching QIDs found. Are you sure you are scoring the evaluation set?")
+
+    length = len(qids_to_ranked_candidate_passages)
+    MRR = MRR / length
+    recall_top1 = len(recall_q_top1) * 1.0 / length
+    recall_top5 = len(recall_q_top5) * 1.0 / length
+    recall_top10 = len(recall_q_top10) * 1.0 / length
+    recall_top20 = len(recall_q_top20) * 1.0 / length
+    recall_top100 = len(recall_q_top100) * 1.0 / length
+    recall_all = len(recall_q_all) * 1.0 / length
+    all_scores['MRR @10'] = MRR
+    all_scores["recall@1"] = recall_top1
+    all_scores["recall@5"] = recall_top5
+    all_scores["recall@10"] = recall_top10
+    all_scores["recall@20"] = recall_top20
+    all_scores["recall@100"] = recall_top100
+    all_scores["recall@all"] = recall_all
+    all_scores['QueriesRanked'] = len(qids_to_ranked_candidate_passages)
+    return all_scores
+
 
 def to_device(data: Union[torch.Tensor, Any], device, non_blocking=False) -> Union[torch.Tensor, Any]:
     """
@@ -214,6 +300,7 @@ class ModelConfig:
     dense_term_topk: int = field(default=5, metadata={"help": "top k terms"})
     use_dense_pooler: Optional[bool] = field(default=True)
     use_term_mlmhead: Optional[bool] = field(default=False)
+    vocab_weight_path: str = field(default=None)
 
     num_task_bert: int = field(default=2)
     task_list: str = field(default="sent,sparse,term")
@@ -278,7 +365,7 @@ class EvaluationConfig(TrainingArguments):
 
     retrieve_result_output_dir: str = field(default=None)
     retrieve_topk: int = field(default=200)
-    qrel_path: str = field(default=None)
+    eval_gt_path: str = field(default=None)
 
     kterm_num: int = field(default=None)
     qterm_num: int = field(default=None)
@@ -289,6 +376,8 @@ class EvaluationConfig(TrainingArguments):
     encode_query: bool = field(default=False)
     save_ranking: bool = field(default=False)
     save_name: str = field(default=None)
+
+    shards_num: int = field(default=-1)
 
     def __post_init__(self):
         if self.index_filename is None:
