@@ -378,6 +378,7 @@ class EvaluationConfig(TrainingArguments):
     save_name: str = field(default=None)
 
     shards_num: int = field(default=-1)
+    start_shard: int = field(default=-1)
 
     def __post_init__(self):
         if self.index_filename is None:

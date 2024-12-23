@@ -53,7 +53,7 @@ class MARCOWSTestIdsDataset(Dataset):
             self.idmapping = idmapping
             self.mapper = lambda x: self.idmapping[str(x)]
         else:
-            self.mapper = lambda x: x+1
+            self.mapper = lambda x: x+1 # For train
         self.tokenizer = tokenizer
         self.max_length = max_length
 
@@ -172,10 +172,11 @@ class SparseRetriever(Evalutator):
                                                     threshold,
                                                     self.invert_index.total_docs)
                 indices, scores = self.select_topk(indices, scores, k=top_k)
-                print(indices)
+                # print(indices)
                 indices = np.array([int(self.doc_ids[i]) for i in indices])
-                print(indices)
+                # print(indices)
                 res[int(query["text_id"])] = [indices, scores]  
+                
         return res
     
     def retrieve(self, query_loader, top_k=100, threshold=0):
@@ -307,9 +308,12 @@ def splade_eval():
         for shard_id in range(shards_num):
             start_idx = shard_id * shard_size
             end_idx = start_idx + shard_size
+            if shard_id < eval_config.start_shard:
+                logger.info("Skip shard: {}".format(shard_id))
+                continue
             if shard_id == shards_num - 1:
                 end_idx = n_passages
-            logger.info(f"Indexing shard {shard_id} from {start_idx} to {end_idx}")
+            logger.info(f"Indexing shard {shard_id} from {start_idx} to {end_idx}, num passages: {end_idx - start_idx}")
 
             corpus_dataset = MARCOWSTestIdsDataset(passage_lmdb_env, tokenizer, 
                                                 start_idx=start_idx, end_idx=end_idx,
@@ -386,6 +390,8 @@ def splade_eval():
             indices, scores = v
             indices, scores = retriever.select_topk(indices, scores, k=top_k)
             res_full[int(k)] = indices, scores
+        
+        
 
         if eval_config.eval_gt_path:
             eval_result = compute_metrics(load_gt(eval_config.eval_gt_path), res_full)
@@ -426,6 +432,7 @@ def splade_eval():
         model = full_model.q_encoder
         retriever = SparseRetriever(
             model,
+            eval_config.index_dir,
             eval_config
         )
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -458,6 +465,10 @@ def splade_eval():
                     res_full[k][0] = np.concatenate((res_full[k][0], v[0]), axis=0) # Indices
                     res_full[k][1] = np.concatenate((res_full[k][1], v[1]), axis=0) # Scores
 
+        #         break
+        # for k, v in res_full.items():
+        #     print(k, v)
+        #     break
         top_k = eval_config.retrieve_topk
         for k, v in tqdm(res_full.items(), total=len(res_full), desc="Select topk"):
             indices, scores = v

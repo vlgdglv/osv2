@@ -143,14 +143,14 @@ class InvertedIndex:
         json.dump(index_dist, open(os.path.join(self.index_path, "index_dist.json"), "w"))
         print("Dist dumped.")
 
-    def add_item(self, col, row, value):
+    def add_item(self, row, col, value):
         if self.ignore_keys and row < self.ignore_token_before:
             return
         self.index_ids[col].append(int(row))
         self.index_values[col].append(value)
         self.total_docs += 1
 
-    def add_batch_item(self, col, row, value):
+    def add_batch_item(self, row, col, value):
         for r, c, v in zip(row, col, value):
             if self.ignore_keys and int(r) < self.ignore_token_before:
                 continue
