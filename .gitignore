@@ -13,6 +13,7 @@ dense_tower/coCondensor-nq/
 dense_tower/coCondenser-marco/
 **/spann/*
 !**/spann/*.py
+!**/spann/*.sh
 .fuse_hidden*
 
 beir/data_ids
