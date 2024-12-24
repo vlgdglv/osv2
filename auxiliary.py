@@ -1,7 +1,8 @@
 
 import os
 import datetime as dt
-
+import struct
+import numpy as np
 from dataclasses import dataclass, field
 from typing import Optional
 from transformers import TrainingArguments
@@ -99,6 +100,72 @@ def compute_metrics(gt_dict, qids_to_ranked_candidate_passages):
     return all_scores
 
 
+"""
+IO Utils
+""" 
+def read_fbin(filename, start_idx=0, chunk_size=None):
+    """ Read *.fbin file that contains float32 vectors
+    Args:
+        :param filename (str): path to *.fbin file
+        :param start_idx (int): start reading vectors from this index
+        :param chunk_size (int): number of vectors to read. 
+                                 If None, read all vectors
+    Returns:
+        Array of float32 vectors (numpy.ndarray)
+    """
+    with open(filename, "rb") as f:
+        nvecs, dim = np.fromfile(f, count=2, dtype=np.int32)
+        nvecs = (nvecs - start_idx) if chunk_size is None else chunk_size
+        arr = np.fromfile(f, count=nvecs * dim, dtype=np.float32, 
+                          offset=start_idx * 4 * dim)
+    return arr.reshape(nvecs, dim)
+ 
+ 
+def read_ibin(filename, start_idx=0, chunk_size=None):
+    """ Read *.ibin file that contains int32 vectors
+    Args:
+        :param filename (str): path to *.ibin file
+        :param start_idx (int): start reading vectors from this index
+        :param chunk_size (int): number of vectors to read.
+                                 If None, read all vectors
+    Returns:
+        Array of int32 vectors (numpy.ndarray)
+    """
+    with open(filename, "rb") as f:
+        nvecs, dim = np.fromfile(f, count=2, dtype=np.int32)
+        nvecs = (nvecs - start_idx) if chunk_size is None else chunk_size
+        arr = np.fromfile(f, count=nvecs * dim, dtype=np.int32, 
+                          offset=start_idx * 4 * dim)
+    return arr.reshape(nvecs, dim)
+ 
+ 
+def write_fbin(filename, vecs):
+    """ Write an array of float32 vectors to *.fbin file
+    Args:s
+        :param filename (str): path to *.fbin file
+        :param vecs (numpy.ndarray): array of float32 vectors to write
+    """
+    assert len(vecs.shape) == 2, "Input array must have 2 dimensions"
+    with open(filename, "wb") as f:
+        nvecs, dim = vecs.shape
+        f.write(struct.pack('<i', nvecs))
+        f.write(struct.pack('<i', dim))
+        vecs.astype('float32').flatten().tofile(f)
+ 
+        
+def write_ibin(filename, vecs):
+    """ Write an array of int32 vectors to *.ibin file
+    Args:
+        :param filename (str): path to *.ibin file
+        :param vecs (numpy.ndarray): array of int32 vectors to write
+    """
+    assert len(vecs.shape) == 2, "Input array must have 2 dimensions"
+    with open(filename, "wb") as f:
+        nvecs, dim = vecs.shape
+        f.write(struct.pack('<i', nvecs))
+        f.write(struct.pack('<i', dim))
+        vecs.astype('int32').flatten().tofile(f)
+    
 def to_device(data: Union[torch.Tensor, Any], device, non_blocking=False) -> Union[torch.Tensor, Any]:
     """
     Prepares one `data` before feeding it to the model, be it a tensor or a nested list/dictionary of tensors.
@@ -357,6 +424,11 @@ class EvaluationConfig(TrainingArguments):
     index_filename: str = field(default=None)
     force_build_index: bool = field(default=False)
 
+    # Dense Eval
+    encode_query: bool = field(default=False)
+    encode_corpus: bool = field(default=False)
+
+    # Sparse Eval
     do_corpus_index: bool = field(default=False)
     do_corpus_encode: bool = field(default=False)
     do_retrieve: bool = field(default=False)

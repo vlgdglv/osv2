@@ -54,8 +54,7 @@ class MultiTaskEncoder(nn.Module):
 
             if self.tasks[0]:
                 bert_pooled = self.bert_pooler(dense_last_hidden, inputs["attention_mask"]) # [BS, HID_LEN]
-                sentence_emb = self.dense_pooler(bert_pooled) if self.use_dense_pooler else bert_pooled  # [BS, HID_LEN]
-                return_dicts["sent_emb"] = sentence_emb
+                return_dicts["sent_emb"] = bert_pooled
             if self.tasks[1]:
                 vocab_logits = self.mlm_head(sparse_last_hidden) # [BS, SEQ_LEN, VOCAB_LEN]
                 attention_mask = inputs["attention_mask"].unsqueeze(-1)

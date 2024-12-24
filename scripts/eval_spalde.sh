@@ -9,7 +9,7 @@ BASE_DIR=/datacosmos/User/baoht/onesparse2/marcov2/
 TRAIN_NAME=warmup_splade
 
 splade_encode_query() {
-    CUDA_VISIBLE_DEVICES=1 python eval_tasks.py \
+    CUDA_VISIBLE_DEVICES=1 python eval_splade.py \
         --do_query_encode True \
         --output_dir runs/encode_corpus \
         --query_lmdb_dir $BASE_DIR/data/lmdb_data/test_queries \
@@ -30,7 +30,7 @@ splade_encode_query() {
 }
 
 splade_build_index() {
-    python eval_tasks.py \
+    python eval_splade.py \
         --do_corpus_index True \
         --force_build_index True \
         --output_dir runs/encode_corpus \
@@ -53,7 +53,7 @@ splade_build_index() {
 
 
 splade_search() {
-    python eval_tasks.py \
+    python eval_splade.py \
         --do_retrieve_from_json True \
         --output_dir runs/encode_corpus \
         --query_lmdb_dir $BASE_DIR/data/lmdb_data/test_queries \
@@ -72,7 +72,7 @@ splade_search() {
         --qterm_num 32 \
         --sparse_pooler_type max \
         --vocab_size 105879 \
-        --shards_num 1 \
+        --shards_num 5 \
         --retrieve_topk 100 \
         --eval_gt_path $BASE_DIR/data/qrels_test.tsv        
 }

@@ -7,7 +7,7 @@ import numba.typed
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
-
+import multiprocessing as mp
 import pickle
 import numba
 import json
@@ -27,7 +27,6 @@ from transformers import (
 )
 
 
-logger = logging.getLogger(__name__)
 from model_zoo import BiEncoder
 from tqdm import tqdm
 from inverted_index import InvertedIndex
@@ -89,6 +88,9 @@ class PredictionCollator(DataCollatorWithPadding):
 class Evalutator:
     def __init__(self, model, config=None):
         self.config = config
+        if model is None:
+            self.model = None
+            return
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.gpu_num = torch.cuda.device_count()
         logger.info("GPU count: {}".format(self.gpu_num))
@@ -98,6 +100,7 @@ class Evalutator:
             model = nn.DataParallel(model, device_ids=[i for i in range(self.gpu_num)])
         model.eval()
         self.model = model
+
 
 class SparseIndex(Evalutator):
     def __init__(self, model, index_dir, config):
@@ -176,7 +179,6 @@ class SparseRetriever(Evalutator):
                 indices = np.array([int(self.doc_ids[i]) for i in indices])
                 # print(indices)
                 res[int(query["text_id"])] = [indices, scores]  
-                
         return res
     
     def retrieve(self, query_loader, top_k=100, threshold=0):
@@ -252,12 +254,22 @@ class SparseRetriever(Evalutator):
         if len(indices) > k:
             parted_idx = np.argpartition(scores, k)[: k]
             indices, scores = indices[parted_idx], scores[parted_idx]
-
+        # scores = -scores
         sorted_idx = np.argsort(scores)
         sorted_indices, sorted_scores = indices[sorted_idx], scores[sorted_idx]
         
-        return sorted_indices, -sorted_scores
+        return sorted_indices, sorted_scores
 
+
+def search_in_shard(shard_id, eval_config):
+    logger.info(f"Searching in shard {shard_id}")
+    retriever = SparseRetriever(
+        None,
+        os.path.join(eval_config.index_dir, f"shard_{shard_id}") ,
+        eval_config
+    )
+    res = retriever.retrieve_from_json(eval_config.query_json_path, top_k=eval_config.retrieve_topk)     
+    return shard_id, res
 
 def splade_eval():
     parser = HfArgumentParser((EvaluationConfig, DataConfig, ModelConfig))
@@ -402,8 +414,7 @@ def splade_eval():
             logger.info("No qrels file, save result to: {}".format(save_ranking_path))
             with open(save_ranking_path, 'wb') as f:
                 pickle.dump(res_full, f)
-
-       
+    
     if eval_config.do_query_encode:
         logger.info("--------------------- QUERY ENCODE PROCEDURE ---------------------")
         is_query = True
@@ -450,14 +461,15 @@ def splade_eval():
         model = full_model.q_encoder
         
         res_full = {}
+        pool = mp.Pool(processes=shards_num)
+        results = []
         for shard_id in range(shards_num):
-            logger.info(f"Searching in shard {shard_id}")
-            retriever = SparseRetriever(
-                model,
-                os.path.join(eval_config.index_dir, f"shard_{shard_id}") ,
-                eval_config
-            )
-            res = retriever.retrieve_from_json(eval_config.query_json_path, top_k=eval_config.retrieve_topk)
+            results.append(pool.apply_async(search_in_shard, args=(shard_id, eval_config)))
+            
+        pool.close()
+        pool.join()
+        for result in results:
+            shard_id, res = result.get()
             for k, v in res.items():
                 if shard_id == 0:
                     res_full[k] = v
@@ -472,7 +484,7 @@ def splade_eval():
         top_k = eval_config.retrieve_topk
         for k, v in tqdm(res_full.items(), total=len(res_full), desc="Select topk"):
             indices, scores = v
-            indices, scores = retriever.select_topk(indices, scores, k=top_k)
+            indices, scores = SparseRetriever.select_topk(indices, scores, k=top_k)
             res_full[int(k)] = indices, scores
             
 

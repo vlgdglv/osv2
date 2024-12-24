@@ -18,6 +18,7 @@ from transformers import  (
     )
 
 from model_zoo import BiEncoder, MultiTaskBert, MultiTaskBertConfig, MLMHead
+from auxiliary import ModelConfig
 
 @dataclass
 class VeryTemporaryConfig:
@@ -49,7 +50,7 @@ def compare_models(model_a, model_b):
     return True
 
 
-def ensamble_init_model():
+def ensamble_init_model_for_splade_warmup():
     adhoc_config = VeryTemporaryConfig
     model_name =  "google-bert/bert-base-multilingual-uncased"
     
@@ -150,8 +151,76 @@ def print_dict():
     print(init_k_bert.embeddings.state_dict())
 
 
+def ensamble_init_model_for_cotrain():  
+    adhoc_config = VeryTemporaryConfig
+    model_name =  "google-bert/bert-base-multilingual-uncased"
+    warmup_model_path = "runs/marcows/warmup_splade"
+    berts_model_path = "/datacosmos/User/baoht/onesparse2/marcov2/models/SimANS-checkpoint-36000"
+    
+    saved_state = load_states_from_checkpoint(berts_model_path)
+    ctx_model_dicts = {key.split("ctx_model.")[1]: value for key, value in saved_state.model_dict.items() if key.startswith("ctx_model.")}
+    qry_model_dicts = {key.split("question_model.")[1]: value for key, value in saved_state.model_dict.items() if key.startswith("question_model.")}
+
+    init_k_bert = AutoModel.from_pretrained(model_name, state_dict=ctx_model_dicts)
+    init_q_bert = AutoModel.from_pretrained(model_name, state_dict=qry_model_dicts)
+    cfg = BertConfig.from_pretrained(model_name)
+
+    k_hfconfig = MultiTaskBertConfig(num_shared_layer=8, num_task_layer=4, num_task_bert=2)
+    q_hfconfig = MultiTaskBertConfig(num_shared_layer=8, num_task_layer=4, num_task_bert=2)
+    k_hfconfig.vocab_size = q_hfconfig.vocab_size = cfg.vocab_size  # 105879
+    k_bert = MultiTaskBert(k_hfconfig)
+    q_bert = MultiTaskBert(q_hfconfig)
+    k_bert.shared_encoder.embeddings.load_state_dict(init_k_bert.embeddings.state_dict())
+    q_bert.shared_encoder.embeddings.load_state_dict(init_q_bert.embeddings.state_dict())
+
+    for i, layer in enumerate(init_k_bert.encoder.layer[:k_hfconfig.num_shared_layer]):
+        k_bert.shared_encoder.encoder.layer[i].load_state_dict(layer.state_dict())
+    for i, layer in enumerate(init_q_bert.encoder.layer[:q_hfconfig.num_shared_layer]):
+        q_bert.shared_encoder.encoder.layer[i].load_state_dict(layer.state_dict())
+
+    for i, layer in enumerate(init_k_bert.encoder.layer[-k_hfconfig.num_task_layer:]):
+        for j in range(len(k_bert.task_encode_list)):
+            k_bert.task_encode_list[j][i].load_state_dict(layer.state_dict())
+    for i, layer in enumerate(init_q_bert.encoder.layer[-q_hfconfig.num_task_layer:]):
+        for j in range(len(q_bert.task_encode_list)):
+            q_bert.task_encode_list[j][i].load_state_dict(layer.state_dict())
+    print("Multi-task bert init done, checking...")
+
+    rand_input, rand_am = torch.randint(low=1, high=1034, size=[4, 32]), torch.ones([4, 32])
+    k_bert.eval()
+    init_k_bert.eval()
+    t1 = k_bert(**{"input_ids": rand_input, "attention_mask": rand_am})[2][0]
+    t2 = init_k_bert(rand_input, rand_am).last_hidden_state[0]
+    assert torch.equal(t1, t2), "k bert not properly load"
+    q_bert.eval()
+    init_q_bert.eval()
+    t1 = q_bert(**{"input_ids": rand_input, "attention_mask": rand_am})[2][0]
+    t2 = init_q_bert(rand_input, rand_am).last_hidden_state[0]
+    assert torch.equal(t1, t2), "q bert not properly load"
+
+    output_dir = "models/init_cotrain"
+    q_dir, k_dir = os.path.join(output_dir, "q_encoder"), os.path.join(output_dir, "k_encoder")
+    os.makedirs(q_dir, exist_ok=True)
+    os.makedirs(k_dir, exist_ok=True)
+
+    k_bert.save_pretrained(k_dir)
+    q_bert.save_pretrained(q_dir)
+    print("Multitask-bert saved")
+
+    q_mlm_head = MLMHead(adhoc_config.hidden_size, adhoc_config.vocab_size)
+    k_mlm_head = MLMHead(adhoc_config.hidden_size, adhoc_config.vocab_size)
+    k_mlm_head.load_state_dict(torch.load(os.path.join(warmup_model_path, "k_encoder/mlm_head.pth")))
+    q_mlm_head.load_state_dict(torch.load(os.path.join(warmup_model_path, "q_encoder/mlm_head.pth")))   
+    print("MLMHead initialized, checking...")
+
+    torch.save(k_mlm_head.state_dict(), os.path.join(k_dir, "mlm_head.pth"))
+    torch.save(q_mlm_head.state_dict(), os.path.join(q_dir, "mlm_head.pth"))
+    print("MLMHead saved.")
+
+
 if __name__ == "__main__":
-    ensamble_init_model()
+    # ensamble_init_model_for_splade_warmup()
     # load_save_test()
     # print_dict()
+    ensamble_init_model_for_cotrain()
     pass

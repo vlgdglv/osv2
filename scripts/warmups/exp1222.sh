@@ -37,7 +37,7 @@ train(){
 }
 
 splade_encode_query() {
-    CUDA_VISIBLE_DEVICES=1 python eval_tasks.py \
+    CUDA_VISIBLE_DEVICES=1 python eval_splade.py \
         --do_query_encode True \
         --output_dir runs/encode_corpus \
         --query_lmdb_dir $BASE_DIR/data/lmdb_data/test_queries \
@@ -48,7 +48,7 @@ splade_encode_query() {
         --fp16 \
         --per_device_eval_batch_size 1 \
         --dataloader_num_workers 32 \
-        --index_dir splade_index/warmup \
+        --index_dir splade_index/$TRAIN_NAME \
         --retrieve_result_output_dir splade_results/$TRAIN_NAME \
         --save_name test.query.json \
         --q_max_len 32 \
@@ -58,7 +58,7 @@ splade_encode_query() {
 }
 
 splade_search() {
-    python eval_tasks.py \
+    python eval_splade.py \
         --do_retrieve_from_json True \
         --output_dir runs/encode_corpus \
         --query_lmdb_dir $BASE_DIR/data/lmdb_data/test_queries \
@@ -83,7 +83,7 @@ splade_search() {
 }
 
 splade_build_index() {
-    python eval_tasks.py \
+    python eval_splade.py \
         --do_corpus_index True \
         --force_build_index True \
         --output_dir runs/encode_corpus \
@@ -104,8 +104,8 @@ splade_build_index() {
         --shards_num 5
 }
 
-train
-splade_build_index
+# train
+# splade_build_index
 # test_splade
-# splade_encode_query
-# splade_search
+splade_encode_query
+splade_search
