@@ -168,33 +168,45 @@ def eval_dense():
     if eval_config.encode_corpus:
         logger.info("--------------------- ENCODE CORPUS PROCEDURE ---------------------")
         is_query = False
+        model = full_model.k_encoder
+
         corpus_lmdb_env = lmdb.open(data_config.corpus_lmdb_dir, subdir=os.path.isdir(data_config.corpus_lmdb_dir), readonly=True, lock=False,
                                  readahead=False, meminit=False)
         with corpus_lmdb_env.begin(write=False) as txn:
             n_corpus = pickle.loads(txn.get(b'__len__'))
-
-        corpus_dataset = MARCOWSTestIdsDataset(corpus_lmdb_env, tokenizer,
-                                               start_idx=0, end_idx=n_corpus,
-                                               max_length=data_config.k_max_len)
-        corpus_loader = DataLoader(
-            corpus_dataset,
-            batch_size=eval_config.per_device_eval_batch_size * torch.cuda.device_count(),
-            collate_fn=PredictionCollator(
-                tokenizer=tokenizer,
-                max_length=data_config.k_max_len,
-                is_query=is_query
-            ),
-            num_workers=eval_config.dataloader_num_workers,
-            pin_memory=True,
-            persistent_workers=True
-        )
-
-        model = full_model.k_encoder
-
-        id_list, embeddings_list = inference(model, corpus_loader)
-        logger.info(f"Corpus embeddings shape: {embeddings_list.shape}")
         
-        store_embeddings(id_list, embeddings_list, eval_config.embedding_output_dir, "corpus")
+        shards_num = eval_config.shards_num
+        assert shards_num > 0
+        shard_size = n_corpus // shards_num        
+        
+        for shard_id in range(shards_num):
+            start_idx = shard_id * shard_size
+            end_idx = start_idx + shard_size
+            if shard_id < eval_config.start_shard:
+                logger.info("Skip shard: {}".format(shard_id))
+                continue
+            if shard_id == shards_num - 1:
+                end_idx = n_corpus
+            logger.info(f"Inference shard {shard_id} from {start_idx} to {end_idx}, num passages: {end_idx - start_idx}")
+
+            corpus_dataset = MARCOWSTestIdsDataset(corpus_lmdb_env, tokenizer,
+                                                start_idx=start_idx, end_idx=end_idx,
+                                                max_length=data_config.k_max_len)
+            corpus_loader = DataLoader(
+                corpus_dataset,
+                batch_size=eval_config.per_device_eval_batch_size * torch.cuda.device_count(),
+                collate_fn=PredictionCollator(
+                    tokenizer=tokenizer,
+                    max_length=data_config.k_max_len,
+                    is_query=is_query
+                ),
+                num_workers=eval_config.dataloader_num_workers,
+                pin_memory=True,
+                persistent_workers=True
+            )
+            id_list, embeddings_list = inference(model, corpus_loader)
+            logger.info(f"Corpus embeddings shape: {embeddings_list.shape}")
+            store_embeddings(id_list, embeddings_list, eval_config.embedding_output_dir, "corpus_shard{:02d}".format(shard_id))
 
 
 if __name__ == "__main__":

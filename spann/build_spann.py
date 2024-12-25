@@ -16,7 +16,7 @@ import argparse
 import SPTAG
 
 from collections import defaultdict
-from ..auxiliary import read_fbin
+from auxiliary import read_fbin_mmap
 
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,7 @@ def build_index(corpus_name, corpus):
     
     index.SetBuildParam("IndexAlgoType", "BKT", "Base")
     index.SetBuildParam("IndexDirectory", corpus_name + "_8", "Base")
-    index.SetBuildParam("DistCalcMethod", "L2", "Base")
+    index.SetBuildParam("DistCalcMethod", "InnerProduct", "Base")
 
     index.SetBuildParam("isExecute", "true", "SelectHead")
     index.SetBuildParam("TreeNumber", "1", "SelectHead")
@@ -60,7 +60,7 @@ def build_index(corpus_name, corpus):
     index.SetBuildParam("SplitFactor", "6", "SelectHead")    
     index.SetBuildParam("SplitThreshold", "100", "SelectHead")  
     index.SetBuildParam("Ratio", "0.1", "SelectHead")   
-    index.SetBuildParam("NumberOfThreads", "16", "SelectHead")
+    index.SetBuildParam("NumberOfThreads", "64", "SelectHead")
     index.SetBuildParam("BKTLambdaFactor", "-1", "SelectHead")
 
     index.SetBuildParam("isExecute", "true", "BuildHead")
@@ -70,7 +70,7 @@ def build_index(corpus_name, corpus):
     index.SetBuildParam("MaxCheck", "8192", "BuildHead")
     index.SetBuildParam("MaxCheckForRefineGraph", "8192", "BuildHead")
     index.SetBuildParam("RefineIterations", "3", "BuildHead")
-    index.SetBuildParam("NumberOfThreads", "16", "BuildHead")
+    index.SetBuildParam("NumberOfThreads", "64", "BuildHead")
     index.SetBuildParam("BKTLambdaFactor", "-1", "BuildHead")
 
     index.SetBuildParam("isExecute", "true", "BuildSSDIndex")
@@ -78,7 +78,7 @@ def build_index(corpus_name, corpus):
     index.SetBuildParam("InternalResultNum", "64", "BuildSSDIndex")
     index.SetBuildParam("ReplicaCount", "8", "BuildSSDIndex")
     index.SetBuildParam("PostingPageLimit", "96", "BuildSSDIndex")
-    index.SetBuildParam("NumberOfThreads", "16", "BuildSSDIndex")
+    index.SetBuildParam("NumberOfThreads", "64", "BuildSSDIndex")
     index.SetBuildParam("MaxCheck", "8192", "BuildSSDIndex")
 
     index.SetBuildParam("SearchPostingPageLimit", "96", "BuildSSDIndex")
@@ -152,12 +152,11 @@ if __name__ == "__main__":
     parser.add_argument("--query_emb_path", type=str, required=False)
     parser.add_argument("--output_path", type=str, required=False)
     parser.add_argument("--gt_path", type=str, required=False)
-    parser.add_argument("--world_size", type=int, required=True)
     parser.add_argument("--total_docs", type=int, required=False, default=None)
     parser.add_argument("--depth", type=int, required=False, default=1000)
     args = parser.parse_args()
 
-    passage_embedding = read_fbin(args.corpus_path)
+    passage_embedding = read_fbin_mmap(args.corpus_path)
 
     print("Passage loaded, shape: {}".format(passage_embedding.shape))
     build_index(args.name, passage_embedding)

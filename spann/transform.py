@@ -11,7 +11,7 @@ import csv
 import numpy as np
 import argparse
 from collections import OrderedDict
-from ..auxiliary import read_fbin, write_fbin
+from auxiliary import read_fbin, write_fbin
 
 def transform_corpus(corpus_path, output_path):
     # load data
