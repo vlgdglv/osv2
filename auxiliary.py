@@ -427,6 +427,7 @@ class EvaluationConfig(TrainingArguments):
     # Dense Eval
     encode_query: bool = field(default=False)
     encode_corpus: bool = field(default=False)
+    search: bool = field(default=False)
 
     # Sparse Eval
     do_corpus_index: bool = field(default=False)
@@ -434,6 +435,7 @@ class EvaluationConfig(TrainingArguments):
     do_retrieve: bool = field(default=False)
     do_query_encode: bool = field(default=False)
     do_retrieve_from_json: bool = field(default=False)
+
 
     retrieve_result_output_dir: str = field(default=None)
     retrieve_topk: int = field(default=200)
@@ -444,6 +446,7 @@ class EvaluationConfig(TrainingArguments):
 
     embedding_output_dir: Optional[str] = field(default=None)
     embedding_output_file: Optional[str] = field(default=None)
+    embedding_dir: Optional[str] = field(default=None) # for eval
     query_json_path: Optional[str] = field(default=None)
     encode_query: bool = field(default=False)
     save_ranking: bool = field(default=False)

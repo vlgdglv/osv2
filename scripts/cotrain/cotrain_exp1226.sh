@@ -23,7 +23,7 @@ train(){
         --query_lmdb_dir $BASE_DIR/data/lmdb_data/train_queries \
         --save_steps 5000 \
         --learning_rate 5e-6 \
-        --num_train_epochs 2 \
+        --num_train_epochs 1 \
         --num_neg 7 \
         --per_device_train_batch_size 16 \
         --dataloader_num_workers 32 \

@@ -1,6 +1,7 @@
 import os
 import sys
 import lmdb
+import json
 import torch
 import torch.nn as nn
 import logging
@@ -25,8 +26,10 @@ from auxiliary import (
     DataConfig, 
     ModelConfig, 
     EvaluationConfig, 
-    write_fbin, write_ibin
+    write_fbin, write_ibin, 
+    read_fbin, read_ibin
 )
+import faiss
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +97,9 @@ def inference(model, dataloader):
             sent_emb = sent_emb.cpu().numpy()
             id_list.extend(text_id)
             embeddings_list.extend(sent_emb)
+
+            if len(embeddings_list) > 51200:
+                break
     
     id_list, embeddings_list = np.array(id_list, dtype=np.int32), np.array(embeddings_list, dtype=np.float32)
     id_list = np.reshape(id_list, (-1, 1))
@@ -104,6 +110,31 @@ def store_embeddings(id_list, embeddings_list, output_path, name):
         os.makedirs(output_path)
     write_fbin(os.path.join(output_path, "{}_embeddings.fbin".format(name)), embeddings_list)
     write_ibin(os.path.join(output_path, "{}_ids.ibin".format(name)), id_list)
+
+def load_embeddings(embedding_dir, name):
+    embeddings = read_fbin(os.path.join(embedding_dir, "{}_embeddings.fbin".format(name)))
+    id_list = read_ibin(os.path.join(embedding_dir, "{}_ids.ibin".format(name)))
+    return embeddings, id_list
+
+def gpu_retrieval(query_embeddings, passage_embeddings, topk):
+    faiss.omp_set_num_threads(90)
+    cpu_index = faiss.IndexFlatIP(passage_embeddings.shape[1])
+    co = faiss.GpuMultipleClonerOptions()
+    co.shard = True
+    co.useFloat16 = True
+    gpu_index_flat = faiss.index_cpu_to_all_gpus(  # build the index
+        cpu_index,
+        co=co
+    )
+    gpu_index_flat.add(query_embeddings)
+    scores, indices = gpu_index_flat.search(passage_embeddings, topk)
+    return scores, indices
+
+def cpu_retrieval(query_embeddings, passage_embeddings, topk):
+    cpu_index = faiss.IndexFlatIP(passage_embeddings.shape[1])
+    cpu_index.add(passage_embeddings)
+    scores, indices = cpu_index.search(query_embeddings, topk)
+    return scores, indices
 
 def eval_dense():
     parser = parser = HfArgumentParser((EvaluationConfig, DataConfig, ModelConfig))
@@ -170,11 +201,12 @@ def eval_dense():
         is_query = False
         model = full_model.k_encoder
 
-        corpus_lmdb_env = lmdb.open(data_config.corpus_lmdb_dir, subdir=os.path.isdir(data_config.corpus_lmdb_dir), readonly=True, lock=False,
+        corpus_lmdb_env = lmdb.open(data_config.passage_lmdb_dir, subdir=os.path.isdir(data_config.passage_lmdb_dir), readonly=True, lock=False,
                                  readahead=False, meminit=False)
         with corpus_lmdb_env.begin(write=False) as txn:
             n_corpus = pickle.loads(txn.get(b'__len__'))
-        
+        id_mapper = json.load(open(data_config.idmapping_path))
+
         shards_num = eval_config.shards_num
         assert shards_num > 0
         shard_size = n_corpus // shards_num        
@@ -191,6 +223,7 @@ def eval_dense():
 
             corpus_dataset = MARCOWSTestIdsDataset(corpus_lmdb_env, tokenizer,
                                                 start_idx=start_idx, end_idx=end_idx,
+                                                idmapping=id_mapper,
                                                 max_length=data_config.k_max_len)
             corpus_loader = DataLoader(
                 corpus_dataset,
@@ -207,6 +240,47 @@ def eval_dense():
             id_list, embeddings_list = inference(model, corpus_loader)
             logger.info(f"Corpus embeddings shape: {embeddings_list.shape}")
             store_embeddings(id_list, embeddings_list, eval_config.embedding_output_dir, "corpus_shard{:02d}".format(shard_id))
+
+    if eval_config.search:
+        logger.info("--------------------- SEARCH PROCEDURE ---------------------")
+        # store_embeddings(id_list, embeddings_list, eval_config.embedding_output_dir, "corpus_shard{:02d}".format(shard_id))
+        query_embeddings, query_ids = load_embeddings(eval_config.embedding_dir, "query")
+        logger.info(f"Query embeddings shape: {query_embeddings.shape}")
+        
+        id_mapper = json.load(open(data_config.idmapping_path))
+        shards_num = eval_config.shards_num
+
+        score_list, index_list = [], []
+        for shard_id in range(shards_num):
+            shard_embeddings, shard_ids = load_embeddings(eval_config.embedding_dir, "corpus_shard{:02d}".format(shard_id))
+            logger.info(f"Search in shard {shard_id}, embeddings length: {shard_embeddings.shape[0]}")
+            
+            scores, indices = cpu_retrieval(query_embeddings, shard_embeddings, topk=eval_config.retrieve_topk)
+            real_dis = shard_ids[indices]
+            
+            score_list.append(scores)
+            index_list.append(real_dis)
+
+        logger.info("Merging results...")
+        score_list = np.concatenate(score_list, axis=0)
+        index_list = np.concatenate(index_list, axis=0)
+        arg_indices = np.argsort(-score_list, axis=1)
+        final_score_list = np.take_along_axis(score_list, arg_indices, axis=1)
+        final_index_list = np.take_along_axis(index_list, arg_indices, axis=1)
+
+        res_full = {}
+        for qid, scores, indices in zip(query_ids, final_score_list, final_index_list):
+            res_full[qid] = [indices, scores]
+
+        if eval_config.eval_gt_path:
+            eval_result = compute_metrics(load_gt(eval_config.eval_gt_path), res_full)
+            print(eval_result)
+        else:
+            os.makedirs(eval_config.retrieve_result_output_dir, exist_ok=True)
+            save_ranking_path = os.path.join(eval_config.retrieve_result_output_dir, "flatip_ranking.pkl")
+            logger.info("No qrels file, save result to: {}".format(save_ranking_path))
+            with open(save_ranking_path, 'wb') as f:
+                pickle.dump(res_full, f)
 
 
 if __name__ == "__main__":
