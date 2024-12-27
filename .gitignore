@@ -15,7 +15,7 @@ dense_tower/coCondenser-marco/
 !**/spann/*.py
 !**/spann/*.sh
 .fuse_hidden*
-
+holding.sh
 beir/data_ids
 beir/data/*
 beir/embeddings

@@ -138,6 +138,24 @@ def read_ibin(filename, start_idx=0, chunk_size=None):
                           offset=start_idx * 4 * dim)
     return arr.reshape(nvecs, dim)
  
+def read_fbin_mmap(filename, start_idx=0, chunk_size=None):
+    """Read *.fbin file using memory mapping (mmap) for large files.
+    
+    Args:
+        :param filename (str): Path to *.fbin file.
+        :param start_idx (int): Start reading vectors from this index.
+        :param chunk_size (int): Number of vectors to read. 
+                                 If None, read all vectors.
+    Returns:
+        Array of float32 vectors (numpy.ndarray).
+    """
+    with open(filename, "rb") as f:
+        nvec, dim = np.fromfile(f, count=2, dtype=np.int32)
+
+    nvecs_to_read = (nvec - start_idx) if chunk_size is None else chunk_size
+    offset = 8 + start_idx * 4 * dim
+    mmap_array = np.memmap(filename, dtype=np.float32, mode='r', offset=offset, shape=(nvecs_to_read, dim))
+    return mmap_array
  
 def write_fbin(filename, vecs):
     """ Write an array of float32 vectors to *.fbin file
@@ -428,6 +446,7 @@ class EvaluationConfig(TrainingArguments):
     encode_query: bool = field(default=False)
     encode_corpus: bool = field(default=False)
     search: bool = field(default=False)
+    use_gpu: bool = field(default=False)
 
     # Sparse Eval
     do_corpus_index: bool = field(default=False)

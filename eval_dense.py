@@ -97,9 +97,6 @@ def inference(model, dataloader):
             sent_emb = sent_emb.cpu().numpy()
             id_list.extend(text_id)
             embeddings_list.extend(sent_emb)
-
-            if len(embeddings_list) > 51200:
-                break
     
     id_list, embeddings_list = np.array(id_list, dtype=np.int32), np.array(embeddings_list, dtype=np.float32)
     id_list = np.reshape(id_list, (-1, 1))
@@ -126,8 +123,8 @@ def gpu_retrieval(query_embeddings, passage_embeddings, topk):
         cpu_index,
         co=co
     )
-    gpu_index_flat.add(query_embeddings)
-    scores, indices = gpu_index_flat.search(passage_embeddings, topk)
+    gpu_index_flat.add(passage_embeddings)
+    scores, indices = gpu_index_flat.search(query_embeddings, topk)
     return scores, indices
 
 def cpu_retrieval(query_embeddings, passage_embeddings, topk):
@@ -150,20 +147,20 @@ def eval_dense():
         level=logging.INFO
     )
 
-    logger.info("MODEL parameters %s", model_config)
-    
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_config.tokenizer_name,
-        cache_dir=model_config.model_cache_dir 
-    )
-    model_config.vocab_size = len(tokenizer)
-    eval_config.vocab_size = len(tokenizer)
-    model_config.half = eval_config.fp16
-
-
-    full_model = BiEncoder(model_config)
-    logger.info("Model loaded.")
-    
+    if eval_config.search:
+        logger.info("Skip loading model.")
+    else:
+        logger.info("MODEL parameters %s", model_config)
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_config.tokenizer_name,
+            cache_dir=model_config.model_cache_dir 
+        )
+        model_config.vocab_size = len(tokenizer)
+        eval_config.vocab_size = len(tokenizer)
+        model_config.half = eval_config.fp16
+        full_model = BiEncoder(model_config)
+        logger.info("Model loaded.")
+        
     if eval_config.encode_query:
         logger.info("--------------------- ENCODE QUERY PROCEDURE ---------------------")
         is_query = True
@@ -245,22 +242,26 @@ def eval_dense():
         logger.info("--------------------- SEARCH PROCEDURE ---------------------")
         # store_embeddings(id_list, embeddings_list, eval_config.embedding_output_dir, "corpus_shard{:02d}".format(shard_id))
         query_embeddings, query_ids = load_embeddings(eval_config.embedding_dir, "query")
+        query_ids = query_ids.reshape(-1)
         logger.info(f"Query embeddings shape: {query_embeddings.shape}")
         
         id_mapper = json.load(open(data_config.idmapping_path))
         shards_num = eval_config.shards_num
-
+        if eval_config.use_gpu:
+            retrieval_func = gpu_retrieval
+        else:
+            retrieval_func = cpu_retrieval
         score_list, index_list = [], []
         for shard_id in range(shards_num):
             shard_embeddings, shard_ids = load_embeddings(eval_config.embedding_dir, "corpus_shard{:02d}".format(shard_id))
+            shard_ids = shard_ids.reshape(-1)
             logger.info(f"Search in shard {shard_id}, embeddings length: {shard_embeddings.shape[0]}")
             
-            scores, indices = cpu_retrieval(query_embeddings, shard_embeddings, topk=eval_config.retrieve_topk)
+            scores, indices = retrieval_func(query_embeddings, shard_embeddings, topk=eval_config.retrieve_topk)
             real_dis = shard_ids[indices]
             
             score_list.append(scores)
             index_list.append(real_dis)
-
         logger.info("Merging results...")
         score_list = np.concatenate(score_list, axis=0)
         index_list = np.concatenate(index_list, axis=0)
