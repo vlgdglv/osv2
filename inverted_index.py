@@ -21,7 +21,7 @@ class InvertedIndex:
                  index_path=None, 
                  file_name="array_index.h5py",
                  force_rebuild=False,
-                 ignore_keys=True, 
+                 ignore_keys=False, 
                  ignore_token_before=173):
         os.makedirs(index_path, exist_ok=True)
         
@@ -204,6 +204,16 @@ class InvertedIndex:
             filtered_indices, scores = filtered_indices[top_indices], scores[top_indices]
         sorted_indices = np.argsort(-scores)
         return filtered_indices[sorted_indices], scores[sorted_indices]
+    
+    def get_postings(self, query):        
+        posting_list, posting_value = [], [] 
+        for i in range(len(query)):
+            query_idx = query[i]
+            if query_idx in self.index_ids.keys():
+                posting_list.append(self.index_ids[query_idx])
+                posting_value.append(self.index_values[query_idx])
+        return posting_list, posting_value
+    
 
 class BM25Retriever:
     def __init__(self,
@@ -292,6 +302,9 @@ class BM25Retriever:
             idf_array[token_id] = idf_calc_fn(doc_freq, n_docs)
 
         return idf_array
+
+    def get_postings(self, query):
+        return self.invert_index.get_postings(query)
 
 
 def _score_idf_robertson(df, N, allow_negative=False):

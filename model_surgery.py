@@ -154,7 +154,7 @@ def print_dict():
 def ensamble_init_model_for_cotrain():  
     adhoc_config = VeryTemporaryConfig
     model_name =  "google-bert/bert-base-multilingual-uncased"
-    warmup_model_path = "runs/marcows/warmup_splade"
+    warmup_model_path = "/datacosmos/User/baoht/onesparse2/marcov2/warehouse/warmup_splade"
     berts_model_path = "/datacosmos/User/baoht/onesparse2/marcov2/models/SimANS-checkpoint-36000"
     
     saved_state = load_states_from_checkpoint(berts_model_path)
