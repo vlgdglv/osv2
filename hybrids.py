@@ -46,6 +46,8 @@ def reciprocal_dis(query_embedding, cand_doc_embd):
 def opposite_dis(query_embedding, cand_doc_embd):
     return - np.sum((query_embedding - cand_doc_embd) ** 2, axis=1)
 
+def inner_product(query_embedding, cand_doc_embd):
+    return np.sum(query_embedding.reshape(1, -1) * cand_doc_embd, axis=1)
 @njit
 def add_scores(cand, postings, scores, values):
     for i in range(len(postings)):
@@ -67,7 +69,7 @@ def prepare_query(query_text_path, query_emb_path, qlookup_path):
 
 class Searcher:
     def __init__(self, 
-                 spann_index, splade_index, 
+                 splade_index, spann_index,  
                  sptag_index, doc_embedding=None,
                  this_weight=1.0, that_weight=10000.0,
                  use_cmp=False, emb_dis_method="rep"):
@@ -82,12 +84,13 @@ class Searcher:
         self.doc_embedding = doc_embedding
         self.use_cmp = use_cmp
 
-        if emb_dis_method == "rep":
-            self.dis_fn = reciprocal_dis
-        elif emb_dis_method == "opp":
-            self.dis_fn = opposite_dis
-        else:
-            raise NotImplementedError
+        # if emb_dis_method == "rep":
+        #     self.dis_fn = reciprocal_dis
+        # elif emb_dis_method == "opp":
+        #     self.dis_fn = opposite_dis
+        # else:
+        #     raise NotImplementedError
+        self.dis_fn = inner_product
     
     def search(self, query, query_embedding, topk=100, cluster_num=256):
         query_text = query["text"]
@@ -218,15 +221,18 @@ if __name__ == "__main__":
         build_invert_index(args)
     
     if args.hybrid_search:
-        query_texts, query_embeddings, qid = prepare_query(args.query_text_path, args.query_emb_path)
+        query_texts, query_embeddings, qlookup = prepare_query(args.query_text_path, args.query_emb_path, args.qlookup_path)
+        qid2idx = {}
+        for idx, qid in enumerate(qlookup):
+            qid2idx[qid] = idx
         total_query = len(query_texts)
         print(query_embeddings.shape)
-        id_mapper = json.load(open(args.qlookup_path))
+        id_mapper = json.load(open(args.plookup_path))
         
-        doer = Searcher.build(args.this_index, args.this_index_name,
-                            args.that_index, args.that_index_name, 
-                            args.spann_index, args.doc_emb_path,
-                            args.this_weight, args.that_weight,
+        doer = Searcher.build(args.splade_index_dir, args.splade_index_name,
+                            args.spann_index_dir, args.spann_index_name, 
+                            args.sptags_index_path, args.doc_emb_path,
+                            args.splade_weight, args.spann_weight,
                             args.use_cmp, args.use_v2, args.v2_dis_method)
 
         total_time_dict = {
@@ -236,20 +242,21 @@ if __name__ == "__main__":
         cnt = 0
         # res = defaultdict(dict)
         res = {}
-        for query_text, query_embedding in tqdm(zip(query_texts, query_embeddings), total=total_query, desc="Retrieving"):
+        for query_text in tqdm(query_texts, total=total_query, desc="Retrieving"):
+            qid = int(query_text["text_id"])
+            query_embedding = query_embeddings[qid2idx[qid]]
             indice, scores, time_dict = doer.search(query_text, query_embedding, 
                                                         topk=args.depth,
                                                         cluster_num=args.cluster_num) 
 
-            qid = str(query_text["text_id"])
             indices = [int(id_mapper[str(docid)]) for docid in indice]
             res[qid] = [indices, scores]
 
             for key, value in time_dict.items():
                 total_time_dict[key] += value
-          
         
         for key, value in total_time_dict.items():
             print("{}:\t {} ms".format(key, 1000 * value / total_query))      
         
-        compute_metrics(load_gt(args.gt_path), res)
+        res_dict = compute_metrics(load_gt(args.gt_path), res)
+        print(res_dict)

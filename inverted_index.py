@@ -306,6 +306,8 @@ class BM25Retriever:
     def get_postings(self, query):
         return self.invert_index.get_postings(query)
 
+    def engage_numba(self):
+        self.invert_index.engage_numba()
 
 def _score_idf_robertson(df, N, allow_negative=False):
     """
