@@ -15,6 +15,7 @@ from collections import defaultdict
 from numba import njit
 from numba.typed import Dict, List
 from numba import types
+import multiprocessing
 
 from inverted_index import InvertedIndex, BM25Retriever
 from auxiliary import read_fbin, load_gt, compute_metrics
@@ -176,6 +177,76 @@ class Searcher:
                    use_cmp, emb_dis_method)
 
 
+
+def process_queries(queries, query_embeddings, qid2idx, id_mapper, doer, args):
+    result = {}
+    local_time_dict = defaultdict(float)
+
+    for query_text in tqdm(queries):
+        qid = int(query_text["text_id"])
+        query_embedding = query_embeddings[qid2idx[qid]]
+        indice, scores, time_dict = doer.search(query_text, query_embedding, 
+                                                topk=args.depth,
+                                                cluster_num=args.cluster_num)
+
+        indices = [int(id_mapper[str(docid)]) for docid in indice]
+        result[qid] = [indices, scores]
+
+        for key, value in time_dict.items():
+            local_time_dict[key] += value
+
+    return result, local_time_dict
+
+
+def multiprocess_search(query_texts, query_embeddings, qid2idx, id_mapper, doer, args):
+    num_processes = min(multiprocessing.cpu_count(), 10)  
+    chunk_size = len(query_texts) // num_processes  
+    chunks = [query_texts[i:i + chunk_size] for i in range(0, len(query_texts), chunk_size)]
+
+    with multiprocessing.Pool(processes=num_processes) as pool:
+        results = pool.starmap(
+            process_queries, 
+            [(chunk, query_embeddings, qid2idx, id_mapper, doer, args) for chunk in chunks]
+        )
+    final_res = {}
+    total_time_dict = {
+            "total": 0, "sptag": 0, "retrieve_postings1": 0, "merge_postings1": 0,
+            "retrieve_postings2": 0, "merge_postings2": 0, "get_topk": 0,
+        }
+
+    for partial_res, partial_time_dict in results:
+        final_res.update(partial_res)
+        for key, value in partial_time_dict.items():
+            total_time_dict[key] += value
+
+    return final_res, total_time_dict
+
+def search(query_texts, query_embeddings, qid2idx, id_mapper, doer, args):
+    cnt = 0
+    # res = defaultdict(dict)
+    res = {}
+    total_time_dict = {
+            "total": 0, "sptag": 0, "retrieve_postings1": 0, "merge_postings1": 0,
+            "retrieve_postings2": 0, "merge_postings2": 0, "get_topk": 0,
+        }
+    for query_text in tqdm(query_texts, total=total_query, desc="Retrieving"):
+        qid = int(query_text["text_id"])
+        query_embedding = query_embeddings[qid2idx[qid]]
+        indice, scores, time_dict = doer.search(query_text, query_embedding, 
+                                                    topk=args.depth,
+                                                    cluster_num=args.cluster_num) 
+
+        indices = [int(id_mapper[str(docid)]) for docid in indice]
+        res[qid] = [indices, scores]
+
+        for key, value in time_dict.items():
+            total_time_dict[key] += value
+        cnt += 1
+        if cnt >= 5:
+            break
+    return res, total_time_dict
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
@@ -235,26 +306,11 @@ if __name__ == "__main__":
                             args.splade_weight, args.spann_weight,
                             args.use_cmp, args.use_v2, args.v2_dis_method)
 
-        total_time_dict = {
-            "total": 0, "sptag": 0, "retrieve_postings1": 0, "merge_postings1": 0,
-            "retrieve_postings2": 0, "merge_postings2": 0, "get_topk": 0,
-        }
-        cnt = 0
-        # res = defaultdict(dict)
-        res = {}
-        for query_text in tqdm(query_texts, total=total_query, desc="Retrieving"):
-            qid = int(query_text["text_id"])
-            query_embedding = query_embeddings[qid2idx[qid]]
-            indice, scores, time_dict = doer.search(query_text, query_embedding, 
-                                                        topk=args.depth,
-                                                        cluster_num=args.cluster_num) 
-
-            indices = [int(id_mapper[str(docid)]) for docid in indice]
-            res[qid] = [indices, scores]
-
-            for key, value in time_dict.items():
-                total_time_dict[key] += value
         
+        
+        # res, total_time_dict = search(query_texts, query_embeddings, qid2idx, id_mapper, doer, args)
+        res, total_time_dict = multiprocess_search(query_texts, query_embeddings, qid2idx, id_mapper, doer, args)
+    
         for key, value in total_time_dict.items():
             print("{}:\t {} ms".format(key, 1000 * value / total_query))      
         

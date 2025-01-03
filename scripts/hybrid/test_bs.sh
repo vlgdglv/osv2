@@ -1,6 +1,6 @@
 export PYTHONPATH=/home/aiscuser/SPTAG/Release:PYTHONPATH
 
-BASE_DIR=/datacosmos/local/User/baoht/onesparse2/marcov2
+BASE_DIR=/datacosmos/User/baoht/onesparse2/marcov2
 
 build_spann_ii(){
     python hybrids.py --build_spann_ii \
@@ -24,7 +24,7 @@ search_bs(){
         --doc_emb_path  $BASE_DIR/embeddings/bs_SimANS_36k/test_corpus.bin \
         --qlookup_path $BASE_DIR/embeddings/bs_SimANS_36k/qlookup.pkl \
         --plookup_path $BASE_DIR/data/training_data/id2id_test.json \
-        --gt_path data/msmarco/qrels.dev.tsv \
+        --gt_path $BASE_DIR/data/qrels_test.tsv \
         --splade_weight 1 --spann_weight 1 \
         --cluster_num 32 \
         --depth 100 

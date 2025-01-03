@@ -76,11 +76,16 @@ class MultiTaskEncoder(nn.Module):
     @classmethod
     def build_model(cls, config, load_name_or_path):
         encoder = MultiTaskBert.load_pretrained(load_name_or_path)
-        mlm_head = MLMHead(config.hidden_size, config.vocab_size)
-        if os.path.exists(os.path.join(load_name_or_path, "mlm_head.pth")):
-            mlm_head.load_state_dict(torch.load(os.path.join(load_name_or_path, "mlm_head.pth")))
+        task_list = config.task_list
+        task_list = task_list.strip().split(",")
+        if "sparse" in task_list:
+            mlm_head = MLMHead(config.hidden_size, config.vocab_size)
+            if os.path.exists(os.path.join(load_name_or_path, "mlm_head.pth")):
+                mlm_head.load_state_dict(torch.load(os.path.join(load_name_or_path, "mlm_head.pth")))
+            else:
+                logger.warning("MLM head not found in: %s", load_name_or_path)
         else:
-            logger.warning("MLM head not found in: %s", load_name_or_path)
+            mlm_head = None
         return cls(config, encoder, mlm_head)
 
 
