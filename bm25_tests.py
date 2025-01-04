@@ -140,7 +140,7 @@ def compute_metrics(qids_to_relevant_passageids, qids_to_ranked_candidate_passag
             ranking.append(0)
             target_pid = qids_to_relevant_passageids[qid]
             candidate_pid = qids_to_ranked_candidate_passages[qid]
-            for i in range(0, MaxMRRRank):
+            for i in range(0, min(MaxMRRRank, len(candidate_pid))):
                 if candidate_pid[i] in target_pid:
                     MRR += 1.0 / (i + 1)
                     ranking.pop()
@@ -266,8 +266,6 @@ if __name__ == "__main__":
             qids_to_ranked_candidate_passages[int(qid)] = [int(mapping_func(str(docid))) for docid in indices]
             # for rank, (docid, score) in enumerate(zip(indices, scores)):
                 # out.write(f"{qid}\t{docid}\t{rank+1}\t{score}\n")
-            break
-
             
     # eval_with_pytrec(res, args.gt_path)
     reldict = load_reference_from_stream(args.gt_path)   

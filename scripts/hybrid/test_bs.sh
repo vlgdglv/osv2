@@ -14,7 +14,7 @@ search_bs(){
     
     python hybrids.py \
         --hybrid_search \
-        --splade_index_dir $BASE_DIR/index/bm25_test \
+        --splade_index_dir $BASE_DIR/index/bm25_test_cut0.01 \
         --splade_index_name bm25_inverted_index.bin \
         --spann_index_dir $BASE_DIR/spann/bs_SimANS_8_invertedIndex \
         --spann_index_name inverted_index.bin \

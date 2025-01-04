@@ -18,14 +18,15 @@ train(){
         --fp16  \
         --model_name_or_path models/init_cotrain \
         --tokenizer_name bert-base-multilingual-uncased \
-        --train_example_dirs $BASE_DIR/data/training_data/training_simANS \
+        --train_example_dirs $BASE_DIR/data/training_data/training_easy \
         --passage_lmdb_dir $BASE_DIR/data/lmdb_data/train_ids_lmdb \
         --query_lmdb_dir $BASE_DIR/data/lmdb_data/train_queries \
         --save_steps 5000 \
         --learning_rate 5e-6 \
-        --num_train_epochs 2 \
-        --num_neg 7 \
-        --per_device_train_batch_size 16 \
+        --num_train_epochs 1 \
+        --num_neg 15 \
+        --per_device_train_batch_size 8 \
+        --gradient_accumulation_steps 4 \
         --dataloader_num_workers 32 \
         --logging_steps 100 \
         --warmup_ratio 0.2 \

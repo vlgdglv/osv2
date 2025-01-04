@@ -157,6 +157,11 @@ class InvertedIndex:
             self.index_ids[c].append(int(r))
             self.index_values[c].append(v)
         self.total_docs += len(set(row))
+    
+    def delete_item(self, key_list):
+        for key in key_list:
+            self.index_ids[key] = []
+            self.index_values[key] = []
 
     def engage_numba(self):
         self.numba_index_ids = Dict.empty(
@@ -213,6 +218,36 @@ class InvertedIndex:
                 posting_list.append(self.index_ids[query_idx])
                 posting_value.append(self.index_values[query_idx])
         return posting_list, posting_value
+
+    @staticmethod
+    @numba.njit(nogil=True, parallel=True, cache=True)
+    def match_and_merge(numba_index_ids: numba.typed.Dict,
+                    numba_index_values: numba.typed.Dict, 
+                    query_ids: np.ndarray, 
+                    corpus_size: int, 
+                    query_values: np.ndarray,
+            ):
+        candidates = Dict.empty(
+            key_type=types.int64,
+            value_type=types.float64,
+        )
+        
+        N = len(query_ids)
+        for i in range(N):
+            query_idx, query_value = query_ids[i], query_values[i]
+            if query_idx in numba_index_ids:
+                retrieved_indices = numba_index_ids[query_idx]
+                retrieved_values = numba_index_values[query_idx]
+            else:
+                continue
+            
+            for j in range(len(retrieved_indices)):
+                if retrieved_indices[j] in candidates:
+                    candidates[retrieved_indices[j]] += query_value * retrieved_values[j]
+                else:
+                    candidates[retrieved_indices[j]] = query_value * retrieved_values[j]
+        
+        return candidates
     
 
 class BM25Retriever:

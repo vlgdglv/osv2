@@ -49,6 +49,7 @@ def opposite_dis(query_embedding, cand_doc_embd):
 
 def inner_product(query_embedding, cand_doc_embd):
     return np.sum(query_embedding.reshape(1, -1) * cand_doc_embd, axis=1)
+
 @njit
 def add_scores(cand, postings, scores, values):
     for i in range(len(postings)):
@@ -102,15 +103,27 @@ class Searcher:
         
         start = timer()
         
-        splade_postings, splade_values = self.splade_index.get_postings(query_text)
+        # splade_postings, splade_values = self.splade_index.get_postings(query_text)
         
+        cand1 = self.splade_index.match_and_merge(
+            numba_index_ids=self.splade_index.numba_index_ids,
+            numba_index_values=self.splade_index.numba_index_values,
+            query_ids=np.array(query_text, dtype=np.int32),
+            query_values=np.array(query_value, dtype=np.float32),
+            corpus_size=self.splade_index.total_docs,
+        )
+
         t1 = timer()
         
-        cand1 = Dict.empty(
-            key_type=types.int64,
-            value_type=types.float64,
-        )
-        add_scores(cand1, splade_postings, splade_values, query_value)
+        # cand1 = defaultdict(float)
+        # for docid, score in enumerate(splade_scores):
+            # if score > 0.0:
+            #     cand1[docid] = score
+        # cand1 = Dict.empty(
+        #     key_type=types.int64,
+        #     value_type=types.float64,
+        # )
+        # add_scores(cand1, splade_postings, splade_values, query_value)
 
         t11 = timer() 
         
@@ -161,7 +174,8 @@ class Searcher:
               use_cmp, use_v2, emb_dis_method):
         sptag_index = SPTAG.AnnIndex.Load(sptags_index_path)
         if not use_v2:
-            splade_index = BM25Retriever(splade_index_dir, splade_index_name)
+            bm25 = BM25Retriever(splade_index_dir, splade_index_name)
+            splade_index = bm25.invert_index
         else:
             splade_index = InvertedIndex(splade_index_dir, splade_index_name) # temp magic number
 
@@ -197,22 +211,34 @@ def process_queries(queries, query_embeddings, qid2idx, id_mapper, doer, args):
 
     return result, local_time_dict
 
+def init_worker(query_embeddings, qid2idx, id_mapper):
+    """初始化子进程环境"""
+    global shared_query_embeddings, shared_qid2idx, shared_id_mapper
+    shared_query_embeddings = query_embeddings
+    shared_qid2idx = qid2idx
+    shared_id_mapper = id_mapper
+
 
 def multiprocess_search(query_texts, query_embeddings, qid2idx, id_mapper, doer, args):
-    num_processes = min(multiprocessing.cpu_count(), 10)  
-    chunk_size = len(query_texts) // num_processes  
+    """主函数：多进程搜索"""
+    num_processes = min(multiprocessing.cpu_count(), 4)
+    chunk_size = len(query_texts) // num_processes
     chunks = [query_texts[i:i + chunk_size] for i in range(0, len(query_texts), chunk_size)]
 
-    with multiprocessing.Pool(processes=num_processes) as pool:
+    # 创建进程池
+    with multiprocessing.Pool(
+        processes=num_processes,
+        initializer=init_worker,
+        initargs=(query_embeddings, qid2idx, id_mapper)
+    ) as pool:
         results = pool.starmap(
             process_queries, 
-            [(chunk, query_embeddings, qid2idx, id_mapper, doer, args) for chunk in chunks]
+            [(chunk, doer, args) for chunk in chunks]
         )
+
+    # 合并结果
     final_res = {}
-    total_time_dict = {
-            "total": 0, "sptag": 0, "retrieve_postings1": 0, "merge_postings1": 0,
-            "retrieve_postings2": 0, "merge_postings2": 0, "get_topk": 0,
-        }
+    total_time_dict = defaultdict(float)
 
     for partial_res, partial_time_dict in results:
         final_res.update(partial_res)
@@ -242,8 +268,8 @@ def search(query_texts, query_embeddings, qid2idx, id_mapper, doer, args):
         for key, value in time_dict.items():
             total_time_dict[key] += value
         cnt += 1
-        if cnt >= 5:
-            break
+        # if cnt >= 5:
+        #     break
     return res, total_time_dict
 
 
@@ -308,11 +334,11 @@ if __name__ == "__main__":
 
         
         
-        # res, total_time_dict = search(query_texts, query_embeddings, qid2idx, id_mapper, doer, args)
-        res, total_time_dict = multiprocess_search(query_texts, query_embeddings, qid2idx, id_mapper, doer, args)
+        res, total_time_dict = search(query_texts, query_embeddings, qid2idx, id_mapper, doer, args)
+        # res, total_time_dict = multiprocess_search(query_texts, query_embeddings, qid2idx, id_mapper, doer, args)
     
         for key, value in total_time_dict.items():
-            print("{}:\t {} ms".format(key, 1000 * value / total_query))      
+            print("{}:\t {} ms".format(key, 1000 * value / len(res)))      
         
         res_dict = compute_metrics(load_gt(args.gt_path), res)
         print(res_dict)
