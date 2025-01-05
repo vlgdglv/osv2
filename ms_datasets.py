@@ -94,6 +94,46 @@ def load_passages_lmdb(args):
     return doc_pool_env.begin(write=False), doc_pool_env_test.begin(write=False)
 
 
+class TextDatasetLMDBMeta(torch.utils.data.Dataset):
+    def __init__(self, start_idx, end_idx, doc_pool_txn, tokenizer, opt, id2id=None):
+        self.start_idx = start_idx
+        self.end_idx = end_idx
+        self.doc_pool_txn = doc_pool_txn
+        self.length = self.end_idx - self.start_idx
+        self.tokenizer = tokenizer
+        self.opt = opt
+        self.max_seq_length = opt.max_seq_length
+        self.id2id = id2id
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, index):
+        if self.id2id!=None:
+            real_index = str(self.id2id[str(index + self.start_idx)])
+        else:
+            real_index = str(index + 1 + self.start_idx)
+        url, title, body = pickle.loads(self.doc_pool_txn.get(real_index.encode()))
+
+        prev_tokens = ['[CLS]']  + self.tokenizer.tokenize(url)[:42] + ['[SEP]'] + self.tokenizer.tokenize(title)[:41] + ['[SEP]']
+        body_tokens = self.tokenizer.tokenize(body)[:(self.max_seq_length - len(prev_tokens) - 1)]
+        passage = prev_tokens + body_tokens + ['[SEP]']
+
+        passage = self.tokenizer.convert_tokens_to_ids(passage)[:self.max_seq_length]
+        
+        return real_index, passage
+
+    @classmethod
+    def get_collate_fn(cls, args):
+        def create_passage_input(features):
+            index_list = [x[0] for x in features]
+            d_list = [x[1] for x in features]
+            max_d_len = max([len(d) for d in d_list])
+            d_list = [d + [args.pad_token_id] * (max_d_len - len(d)) for d in d_list]
+            doc_tensor = torch.LongTensor(d_list)
+            return index_list, doc_tensor, (doc_tensor != 0).long()
+        return create_passage_input
+
 class TextIdsDatasetLMDBMeta(torch.utils.data.Dataset):
     def __init__(self, start_idx, end_idx, doc_pool_txn, opt, id2id=None):
         self.start_idx = start_idx

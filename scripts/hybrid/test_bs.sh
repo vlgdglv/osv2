@@ -14,7 +14,7 @@ search_bs(){
     
     python hybrids.py \
         --hybrid_search \
-        --splade_index_dir $BASE_DIR/index/bm25_test_cut0.01 \
+        --splade_index_dir $BASE_DIR/index/bm25_test_cut0.1 \
         --splade_index_name bm25_inverted_index.bin \
         --spann_index_dir $BASE_DIR/spann/bs_SimANS_8_invertedIndex \
         --spann_index_name inverted_index.bin \
@@ -25,8 +25,8 @@ search_bs(){
         --qlookup_path $BASE_DIR/embeddings/bs_SimANS_36k/qlookup.pkl \
         --plookup_path $BASE_DIR/data/training_data/id2id_test.json \
         --gt_path $BASE_DIR/data/qrels_test.tsv \
-        --splade_weight 1 --spann_weight 1 \
-        --cluster_num 32 \
+        --splade_weight 1 --spann_weight 10000 \
+        --cluster_num 256 \
         --depth 100 
 }
 

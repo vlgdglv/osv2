@@ -165,6 +165,10 @@ class Searcher:
 
         return docs, scores, time_dict
     
+    def set_weight(self, this_weight, that_weight):
+        self.this_weight = this_weight
+        self.that_weight = that_weight
+
     @classmethod
     def build(cls, 
               splade_index_dir, splade_index_name,
@@ -268,7 +272,7 @@ def search(query_texts, query_embeddings, qid2idx, id_mapper, doer, args):
         for key, value in time_dict.items():
             total_time_dict[key] += value
         cnt += 1
-        # if cnt >= 5:
+        # if cnt >= 500:
         #     break
     return res, total_time_dict
 
@@ -325,15 +329,17 @@ if __name__ == "__main__":
         total_query = len(query_texts)
         print(query_embeddings.shape)
         id_mapper = json.load(open(args.plookup_path))
-        
         doer = Searcher.build(args.splade_index_dir, args.splade_index_name,
-                            args.spann_index_dir, args.spann_index_name, 
-                            args.sptags_index_path, args.doc_emb_path,
-                            args.splade_weight, args.spann_weight,
-                            args.use_cmp, args.use_v2, args.v2_dis_method)
+                                args.spann_index_dir, args.spann_index_name, 
+                                args.sptags_index_path, args.doc_emb_path,
+                                args.splade_weight, args.spann_weight,
+                                args.use_cmp, args.use_v2, args.v2_dis_method)
 
-        
-        
+        # for w1, w2 in [[1, 100], [1, 10000], [100, 1]]:
+            
+        #     doer.set_weight(w1, w2)            
+            
+            
         res, total_time_dict = search(query_texts, query_embeddings, qid2idx, id_mapper, doer, args)
         # res, total_time_dict = multiprocess_search(query_texts, query_embeddings, qid2idx, id_mapper, doer, args)
     

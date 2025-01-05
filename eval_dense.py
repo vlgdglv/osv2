@@ -76,6 +76,44 @@ class PredictionCollator(DataCollatorWithPadding):
         collated_texts = super().__call__(encode_texts)
         return text_ids, collated_texts
 
+class TextDatasetLMDBMeta(torch.utils.data.Dataset):
+    def __init__(self, start_idx, end_idx, doc_pool_txn, tokenizer, id2id=None):
+        self.start_idx = start_idx
+        self.end_idx = end_idx
+        self.doc_pool_txn = doc_pool_txn
+        self.length = self.end_idx - self.start_idx
+        self.tokenizer = tokenizer
+        self.max_seq_length = 128
+        self.id2id = id2id
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, index):
+        if self.id2id!=None:
+            real_index = str(self.id2id[str(index + self.start_idx)])
+        else:
+            real_index = str(index + 1 + self.start_idx)
+        url, title, body = pickle.loads(self.doc_pool_txn.get(real_index.encode()))
+
+        prev_tokens = ['[CLS]']  + self.tokenizer.tokenize(url)[:42] + ['[SEP]'] + self.tokenizer.tokenize(title)[:41] + ['[SEP]']
+        body_tokens = self.tokenizer.tokenize(body)[:(self.max_seq_length - len(prev_tokens) - 1)]
+        passage = prev_tokens + body_tokens + ['[SEP]']
+
+        passage = self.tokenizer.convert_tokens_to_ids(passage)[:self.max_seq_length]
+        
+        return real_index, passage
+
+    @classmethod
+    def get_collate_fn(cls, pad_token_id):
+        def create_passage_input(features):
+            index_list = [int(x[0]) for x in features]
+            d_list = [x[1] for x in features]
+            max_d_len = max([len(d) for d in d_list])
+            d_list = [d + [pad_token_id] * (max_d_len - len(d)) for d in d_list]
+            doc_tensor = torch.LongTensor(d_list)
+            return index_list, doc_tensor, (doc_tensor != 0).long()
+        return create_passage_input
 
 def inference(model, dataloader):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -88,8 +126,10 @@ def inference(model, dataloader):
     id_list, embeddings_list = [], []
     with torch.no_grad():
         for batch in tqdm(dataloader):
-            text_id, encode_passages = batch
-            encode_passages = to_device(encode_passages, device)
+            # text_id, encode_passages = batch
+            # encode_passages = to_device(encode_passages, device)
+            text_id, text_ids, text_mask = batch
+            encode_passages = {"input_ids": to_device(text_ids, device), "attention_mask": to_device(text_mask, device)}
             outputs = model(**encode_passages)
             
             # sent_emb = outputs.last_hidden_state[:, 0]
@@ -218,21 +258,30 @@ def eval_dense():
                 end_idx = n_corpus
             logger.info(f"Inference shard {shard_id} from {start_idx} to {end_idx}, num passages: {end_idx - start_idx}")
 
-            corpus_dataset = MARCOWSTestIdsDataset(corpus_lmdb_env, tokenizer,
-                                                start_idx=start_idx, end_idx=end_idx,
-                                                idmapping=id_mapper,
-                                                max_length=data_config.k_max_len)
-            corpus_loader = DataLoader(
-                corpus_dataset,
-                batch_size=eval_config.per_device_eval_batch_size * torch.cuda.device_count(),
-                collate_fn=PredictionCollator(
-                    tokenizer=tokenizer,
-                    max_length=data_config.k_max_len,
-                    is_query=is_query
-                ),
+            # corpus_dataset = MARCOWSTestIdsDataset(corpus_lmdb_env, tokenizer,
+            #                                     start_idx=start_idx, end_idx=end_idx,
+            #                                     idmapping=id_mapper,
+            #                                     max_length=data_config.k_max_len)
+            # corpus_loader = DataLoader(
+            #     corpus_dataset,
+            #     batch_size=eval_config.per_device_eval_batch_size * torch.cuda.device_count(),
+            #     collate_fn=PredictionCollator(
+            #         tokenizer=tokenizer,
+            #         max_length=data_config.k_max_len,
+            #         is_query=is_query
+            #     ),
+            #     num_workers=eval_config.dataloader_num_workers,
+            #     pin_memory=True,
+            #     persistent_workers=True
+            # )
+            corpus_dataset = TextDatasetLMDBMeta(start_idx=start_idx, end_idx=end_idx,
+                                                 doc_pool_txn=corpus_lmdb_env.begin(write=False), tokenizer=tokenizer,
+                                                 id2id=id_mapper)
+            corpus_loader = DataLoader(corpus_dataset, batch_size=eval_config.per_device_eval_batch_size * torch.cuda.device_count(),
+                drop_last=False,
+                collate_fn=TextDatasetLMDBMeta.get_collate_fn(tokenizer.pad_token_id),
+                pin_memory=True, persistent_workers=True,
                 num_workers=eval_config.dataloader_num_workers,
-                pin_memory=True,
-                persistent_workers=True
             )
             id_list, embeddings_list = inference(model, corpus_loader)
             logger.info(f"Corpus embeddings shape: {embeddings_list.shape}")

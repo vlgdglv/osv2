@@ -58,7 +58,7 @@ def compute_metrics(gt_dict, qids_to_ranked_candidate_passages):
             candidate_pid, _ = qids_to_ranked_candidate_passages[qid]
             if len(candidate_pid) == 0:
                 continue
-            for i in range(0, MaxMRRRank):
+            for i in range(0, min(MaxMRRRank, len(candidate_pid))):
                 if candidate_pid[i] in target_pid:
                     MRR += 1.0 / (i + 1)
                     ranking.pop()
