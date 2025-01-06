@@ -68,8 +68,9 @@ def modify_index():
             clean_list.append(k)
     print(len(clean_list))
     invert_index.delete_item(clean_list)
-    save_path = "/datacosmos/User/baoht/onesparse2/marcov2/index/bm25_test_cut{}/bm25_inverted_index.bin".format(ratio)
-    os.makedirs(save_path, exist_ok=True)
+    save_dir = "/datacosmos/User/baoht/onesparse2/marcov2/index/bm25_test_cut{}/".format(ratio)
+    os.makedirs(save_dir, exist_ok=True)
+    save_path = os.path.join(save_dir, 'bm25_inverted_index.bin')
     invert_index.file_path = save_path
     invert_index.save()
 
