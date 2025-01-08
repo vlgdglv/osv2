@@ -115,7 +115,7 @@ class TextDatasetLMDBMeta(torch.utils.data.Dataset):
             return index_list, doc_tensor, (doc_tensor != 0).long()
         return create_passage_input
 
-def inference(model, dataloader):
+def inference(model, dataloader, is_query=False):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     gpu_num = torch.cuda.device_count()
     if device == torch.device("cuda") and gpu_num > 1:
@@ -126,10 +126,12 @@ def inference(model, dataloader):
     id_list, embeddings_list = [], []
     with torch.no_grad():
         for batch in tqdm(dataloader):
-            # text_id, encode_passages = batch
-            # encode_passages = to_device(encode_passages, device)
-            text_id, text_ids, text_mask = batch
-            encode_passages = {"input_ids": to_device(text_ids, device), "attention_mask": to_device(text_mask, device)}
+            if is_query:
+                text_id, encode_passages = batch
+                encode_passages = to_device(encode_passages, device)
+            else:
+                text_id, text_ids, text_mask = batch
+                encode_passages = {"input_ids": to_device(text_ids, device), "attention_mask": to_device(text_mask, device)}
             outputs = model(**encode_passages)
             
             # sent_emb = outputs.last_hidden_state[:, 0]
@@ -228,7 +230,7 @@ def eval_dense():
 
         model = full_model.q_encoder
 
-        id_list, embeddings_list = inference(model, query_loader)
+        id_list, embeddings_list = inference(model, query_loader, is_query)
         logger.info(f"Query embeddings shape: {embeddings_list.shape}")
         
         store_embeddings(id_list, embeddings_list, eval_config.embedding_output_dir, "query")

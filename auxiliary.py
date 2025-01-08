@@ -6,6 +6,10 @@ import numpy as np
 from dataclasses import dataclass, field
 from typing import Optional
 from transformers import TrainingArguments
+from tqdm import tqdm
+import json
+import pickle
+import argparse
 import torch
 import torch.nn as nn
 from torch import Tensor
@@ -196,6 +200,72 @@ def to_device(data: Union[torch.Tensor, Any], device, non_blocking=False) -> Uni
         return data.to(device, non_blocking=non_blocking)
     return data
 
+def save_posting_to_bin(postings_list, values_list, save_path):
+    assert len(postings_list) == len(values_list)
+    total_len = len(postings_list)
+    with open(save_path, "wb") as f:
+        f.write(struct.pack("I", total_len))
+        for i in tqdm(range(total_len)):
+            postings, values = postings_list[i], values_list[i]
+            assert len(postings) == len(values)
+            f.write(struct.pack("I", len(postings)))    
+            postings = np.array(postings, dtype=np.int32)
+            values  = np.array(values, dtype=np.float32)
+            f.write(struct.pack("I", postings.nbytes))
+            f.write(postings.tobytes())
+            f.write(struct.pack("I", values.nbytes))
+            f.write(values.tobytes())
+
+
+def save_time_list(time_list, save_path):
+    total_len = len(time_list)
+    with open(save_path, 'wb') as f:
+        f.write(struct.pack("I", total_len))
+        for i in tqdm(range(total_len)):
+            f.write(struct.pack("f", time_list[i])) 
+
+def convert_query_ids_to_bin(args):
+    # qlookup = read_ibin(args.lookup_path)
+    with open(args.query_path, "r") as fr, open(args.output_path, "wb") as fw:
+        lines = fr.readlines()
+        total_query = len(lines)
+        print(total_query)
+        fw.write(struct.pack("I", total_query))
+        for line in tqdm(lines, total=total_query, desc="Loading"):
+            content = json.loads(line.strip())
+            query_ids = np.array(content["text"], dtype=np.int32)
+            query_value = np.array(content["value"] if "value" in content else [1.0 for _ in range(len(query_ids))], dtype=np.float32)
+            
+            fw.write(struct.pack("I", len(query_ids)))
+            ids_size, values_size = query_ids.nbytes, query_value.nbytes
+            fw.write(struct.pack("I", ids_size))
+            fw.write(query_ids.tobytes())
+            fw.write(struct.pack("I", values_size))
+            fw.write(query_value.tobytes())
+
+def convert_gt(args):
+    with open(args.gt_path, 'r') as f:
+        qrel_data = f.readlines()
+
+    qrels = {}
+    for line in qrel_data:
+        line = line.strip().split("\t")
+        query = int(line[0])
+        passage = int(line[2])
+        # rel = int(1)
+        if query not in qrels:
+            qrels[query] = [passage]
+        else:
+            qrels[query].append(passage)
+
+    with open(args.output_path, 'wb') as f:
+        total_len = len(qrels)
+        f.write(struct.pack("I", total_len))
+        for k, v in tqdm(qrels.items()):
+            v = np.array(v, dtype=np.int32)
+            f.write(struct.pack("I", k))   
+            f.write(struct.pack("I", v.nbytes))
+            f.write(v.tobytes())
 
 class InfoNCE:
     def __init__(self, temperature=1.0):
@@ -441,7 +511,8 @@ class EvaluationConfig(TrainingArguments):
     index_dir: str = field(default=None)
     index_filename: str = field(default=None)
     force_build_index: bool = field(default=False)
-
+    sampled_docid_path: str = field(default=None)
+    
     # Dense Eval
     encode_query: bool = field(default=False)
     encode_corpus: bool = field(default=False)
@@ -479,4 +550,29 @@ class EvaluationConfig(TrainingArguments):
             self.index_filename = "invert_index"
 
 if __name__ == "__main__":
-    pass
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--cvt_lookup", action="store_true")
+    parser.add_argument("--cvt_query", action="store_true")
+    parser.add_argument("--cvt_gt", action="store_true")
+
+    parser.add_argument("--embedding_dir", type=str, required=False)
+    parser.add_argument("--embedding_name", type=str, required=False)
+
+    parser.add_argument("--input_path", type=str, required=False)
+    parser.add_argument("--output_path", type=str, required=False)
+    parser.add_argument("--lookup_path", type=str, required=False)
+    parser.add_argument("--query_path", type=str, required=False)
+    parser.add_argument("--gt_path", type=str, required=False, default="data/msmarco/qrels.dev.tsv")
+    
+    args = parser.parse_args()
+
+    if args.cvt_gt:
+        convert_gt(args)
+    if args.cvt_query:
+        convert_query_ids_to_bin(args)
+    if args.cvt_lookup:
+        with open(args.input_path, "rb") as f:
+            lookup = pickle.load(f)
+        lookup = lookup.reshape(-1, 1)
+        write_ibin(args.output_path, lookup)

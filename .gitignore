@@ -21,7 +21,7 @@ beir/data/*
 beir/embeddings
 beir/spann
 !beir/spann/*.py
-
+data_subset/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

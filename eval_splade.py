@@ -116,9 +116,11 @@ class SparseIndex(Evalutator):
         assert self.index_dir is not None
         with torch.no_grad():
             for batch in tqdm(corpus_loader):
+                text_id, text_ids, text_mask = batch
+                encode_passages = {"input_ids": to_device(text_ids, self.device), "attention_mask": to_device(text_mask, self.device)}
                 
-                text_id, encode_passages = batch
-                encode_passages = to_device(encode_passages, self.device)
+                # text_id, encode_passages = batch
+                # encode_passages = to_device(encode_passages, self.device)
                 outputs = self.model(**encode_passages)
         
                 outputs = outputs["vocab_reps"]
@@ -225,7 +227,8 @@ class SparseRetriever(Evalutator):
                     row, doc_dim = torch.nonzero(outputs, as_tuple=True)
                     values = outputs[row.detach().cpu().tolist(), doc_dim.detach().cpu().tolist()]
                 doc_dim, values = doc_dim.view(-1).detach().cpu().numpy(), values.view(-1).detach().cpu().numpy()
-                f.write(json.dumps({"text_id": int(query_id[0]), "text": doc_dim.tolist(), "value": values.tolist()}) + "\n")            
+                f.write(json.dumps({"text_id": int(query_id[0]), "text": doc_dim.tolist(), "value": values.tolist()}) + "\n")
+        return json_list            
                 
     @staticmethod
     @numba.njit(nogil=True, parallel=True, cache=True)

@@ -91,7 +91,6 @@ class InvertedIndex:
 
                     index_ids[key] = ids_array
                     index_values[key] = values_array
-
                 self.total_docs = total_docs
                 self.index_ids, self.index_values = index_ids, index_values
                 f.close()

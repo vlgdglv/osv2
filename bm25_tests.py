@@ -34,67 +34,7 @@ def get_iterator(args):
     for idx in tqdm(range(n_passages)):
         cont = dataset[idx]
         yield cont
-
-def eval_with_pytrec(runs, qrel_path, output_path=None):
-    with open(qrel_path, 'r') as f:
-        qrel_data = f.readlines()
-
-    qrels = {}
-    qrels_ndcg = {}
-    for line in qrel_data:
-        line = line.strip().split("\t")
-        query = line[0]
-        passage = line[2]
-        rel = int(1)
-        if query not in qrels:
-            qrels[query] = {}
-        if query not in qrels_ndcg:
-            qrels_ndcg[query] = {}
-
-        # for NDCG
-        qrels_ndcg[query][passage] = rel
-        # for MAP, MRR, Recall
-        qrels[query][passage] = rel
-
-    evaluator = pytrec_eval.RelevanceEvaluator(qrels, {"map", "recip_rank", "recall.10", 
-                                                       "recall.25", "recall.50",  
-                                                       "recall.100", "recall.200", "recall.1000"
-                                                       })
-    res = evaluator.evaluate(runs)
-
-    map_list = [v['map'] for v in res.values()]
-    mrr_list = [v['recip_rank'] for v in res.values()]
-    recall_10_list = [v['recall_10'] for v in res.values()]
-    recall_25_list = [v['recall_25'] for v in res.values()]
-    recall_50_list = [v['recall_50'] for v in res.values()]
-    recall_100_list = [v['recall_100'] for v in res.values()]
-    recall_200_list = [v['recall_200'] for v in res.values()]
-    recall_1000_list = [v['recall_1000'] for v in res.values()]
-
-    evaluator = pytrec_eval.RelevanceEvaluator(qrels_ndcg, {"ndcg_cut.10"})
-    res = evaluator.evaluate(runs)
-    ndcg_10_list = [v['ndcg_cut_10'] for v in res.values()]
-
-    res = {
-            "MAP": np.average(map_list),
-            "MRR": np.average(mrr_list),
-            "Recall@10": np.average(recall_10_list),
-            "Recall@25": np.average(recall_25_list),
-            "Recall@50": np.average(recall_50_list),
-            "Recall@100": np.average(recall_100_list),
-            "Recall@200": np.average(recall_200_list),
-            "Recall@1000": np.average(recall_1000_list),
-            "NDCG@10": np.average(ndcg_10_list), 
-        }
         
-    print("---------------------Evaluation results:---------------------")    
-    print(res)
-
-    if output_path is not None:
-        with open(output_path, "w") as f:
-            f.write(json.dumps(res, indent=4))
-        return res
-
 def load_reference_from_stream(path_to_reference):
     """Load Reference reference relevant passages
     Args:f (stream): stream to load.

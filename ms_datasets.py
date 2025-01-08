@@ -152,7 +152,6 @@ class TextIdsDatasetLMDBMeta(torch.utils.data.Dataset):
             real_index = str(self.id2id[str(index + self.start_idx)])
         else:
             real_index = str(index + 1 + self.start_idx)
-        
         text = pickle.loads(self.doc_pool_txn.get(real_index.encode()))
         
         return real_index, text
@@ -167,7 +166,6 @@ class TextIdsDatasetLMDBMeta(torch.utils.data.Dataset):
             doc_tensor = torch.LongTensor(d_list)
             return index_list, doc_tensor, (doc_tensor != 0).long()
         return create_passage_input
-
 
 
 
@@ -215,6 +213,33 @@ def pack_gts(args):
             fo.write(arr_v.tobytes())
 
 
+def sample_corpus(args):
+    idmapper = json.load(open(args.id_mapper_path, 'r'))
+    print("idmapper length:", len(idmapper))
+    sample_num = int(args.total_docs * args.sample_ratio)
+
+    gt_docis = []
+    with open(args.gt_path, 'r') as f:
+        for l in f:
+            l = l.strip().split('\t')
+            gt_docis.append(int(l[2]))
+
+    sample_ids = np.random.choice(range(len(idmapper)), sample_num, replace=False)
+    
+    sample_docid = set()
+    for i in tqdm(sample_ids):
+        sample_docid.add(int(idmapper[str(i)]))
+
+    for docid in gt_docis:
+        if docid not in sample_docid:
+            sample_docid.add(docid)
+    
+    sample_docid = list(sample_docid)
+    print("sample docid length:", len(sample_docid))
+    with open(args.save_path, 'wb') as f:
+        pickle.dump(sample_docid, f)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--tokenizer_name", type=str, required=False, default="bert-base-multilingual-uncased")
@@ -222,50 +247,12 @@ if __name__ == "__main__":
     parser.add_argument("--gt_path", type=str, required=False)
     parser.add_argument("--save_path", type=str, required=False)
     parser.add_argument("--passage_path", type=str, default=None)
+    parser.add_argument("--id_mapper_path", type=str, default=None)
+    parser.add_argument("--total_docs", type=int, default=None)
+    parser.add_argument("--sample_ratio", type=float, default=None)
     parser.add_argument("--max_seq_length", default=128, type=int)
 
     args = parser.parse_args()
-    # tokenize_query(args)
-    pack_gts(args)
-    # tokenizer = BertTokenizer.from_pretrained('bert-base-multilingual-uncased')
-    # tokenizer.save_pretrained('bm25_tokenizer')
-
-    # train_doc_pool_txn, test_doc_pool_txn = load_passages_lmdb(args)
-    # n_passages = loads_data(test_doc_pool_txn.get(b'__len__'))
-    # print("Test collection", n_passages)
-
-    # id2id = json.load(open(os.path.join(args.passage_path,'id2id_test.json')))
-
-    # passages_train_path = "/datacosmos/local/User/baoht/onesparse2/marcov2/data/lmdb_data/test_ids_lmdb_new"
-    # # passages_train_path = "/datacosmos/local/User/baoht/onesparse2/marcov2/data/lmdb_data/train_ids_lmdb"
-    # logger.info(f'Loading passages from: {passages_train_path}')
-    # doc_pool_env = lmdb.open(passages_train_path, subdir=os.path.isdir(passages_train_path), readonly=True, lock=False, readahead=False, meminit=False)
-    # txn = doc_pool_env.begin(write=False)
-    # stats = doc_pool_env.stat()
-    # print("Number of entries:", stats['entries'])
-    # n_passages = loads_data(txn.get(b'__len__'))
-    # print("Collection size", n_passages)
-
-
-    # dataset = TextIdsDatasetLMDBMeta(0, 10000000, txn, args)
-    # missings_list = []
-    # for idx in tqdm(range(n_passages)):
-    #     realid, text = dataset[idx]
-    #     if text == -1:
-    #         missings_list.append(realid)
-    # print(missings_list)
-    # print("Missings", len(missings_list))
-    # print(dataset[0])
-    # dataset = TextDatasetLMDBMeta(0, n_passages, test_doc_pool_txn, tokenizer, args, id2id)
-    # print(dataset[0])
-
-    # n_passages = loads_data(train_doc_pool_txn.get(b'__len__'))
-    # print("Train collection", n_passages)
-    # dataset = TextDatasetLMDBMeta(0, n_passages, train_doc_pool_txn, tokenizer, args)
-    # print(dataset[0])
-    # dataloader = DataLoader(dataset, batch_size=1, drop_last=False, num_workers=32)
-
-    # for idx in tqdm(range(n_passages)):
-    #     cont = dataset[idx]
-
-        
+    # pack_gts(args)
+    sample_corpus(args)
+    
