@@ -126,12 +126,12 @@ def inference(model, dataloader, is_query=False):
     id_list, embeddings_list = [], []
     with torch.no_grad():
         for batch in tqdm(dataloader):
-            if is_query:
-                text_id, encode_passages = batch
-                encode_passages = to_device(encode_passages, device)
-            else:
-                text_id, text_ids, text_mask = batch
-                encode_passages = {"input_ids": to_device(text_ids, device), "attention_mask": to_device(text_mask, device)}
+            # if is_query:
+            text_id, encode_passages = batch
+            encode_passages = to_device(encode_passages, device)
+            # else:
+            #     text_id, text_ids, text_mask = batch
+            #     encode_passages = {"input_ids": to_device(text_ids, device), "attention_mask": to_device(text_mask, device)}
             outputs = model(**encode_passages)
             
             # sent_emb = outputs.last_hidden_state[:, 0]
@@ -260,31 +260,31 @@ def eval_dense():
                 end_idx = n_corpus
             logger.info(f"Inference shard {shard_id} from {start_idx} to {end_idx}, num passages: {end_idx - start_idx}")
 
-            # corpus_dataset = MARCOWSTestIdsDataset(corpus_lmdb_env, tokenizer,
-            #                                     start_idx=start_idx, end_idx=end_idx,
-            #                                     idmapping=id_mapper,
-            #                                     max_length=data_config.k_max_len)
-            # corpus_loader = DataLoader(
-            #     corpus_dataset,
-            #     batch_size=eval_config.per_device_eval_batch_size * torch.cuda.device_count(),
-            #     collate_fn=PredictionCollator(
-            #         tokenizer=tokenizer,
-            #         max_length=data_config.k_max_len,
-            #         is_query=is_query
-            #     ),
-            #     num_workers=eval_config.dataloader_num_workers,
-            #     pin_memory=True,
-            #     persistent_workers=True
-            # )
-            corpus_dataset = TextDatasetLMDBMeta(start_idx=start_idx, end_idx=end_idx,
-                                                 doc_pool_txn=corpus_lmdb_env.begin(write=False), tokenizer=tokenizer,
-                                                 id2id=id_mapper)
-            corpus_loader = DataLoader(corpus_dataset, batch_size=eval_config.per_device_eval_batch_size * torch.cuda.device_count(),
-                drop_last=False,
-                collate_fn=TextDatasetLMDBMeta.get_collate_fn(tokenizer.pad_token_id),
-                pin_memory=True, persistent_workers=True,
+            corpus_dataset = MARCOWSTestIdsDataset(corpus_lmdb_env, tokenizer,
+                                                start_idx=start_idx, end_idx=end_idx,
+                                                idmapping=id_mapper,
+                                                max_length=data_config.k_max_len)
+            corpus_loader = DataLoader(
+                corpus_dataset,
+                batch_size=eval_config.per_device_eval_batch_size * torch.cuda.device_count(),
+                collate_fn=PredictionCollator(
+                    tokenizer=tokenizer,
+                    max_length=data_config.k_max_len,
+                    is_query=is_query
+                ),
                 num_workers=eval_config.dataloader_num_workers,
+                pin_memory=True,
+                persistent_workers=True
             )
+            # corpus_dataset = TextDatasetLMDBMeta(start_idx=start_idx, end_idx=end_idx,
+            #                                      doc_pool_txn=corpus_lmdb_env.begin(write=False), tokenizer=tokenizer,
+            #                                      id2id=id_mapper)
+            # corpus_loader = DataLoader(corpus_dataset, batch_size=eval_config.per_device_eval_batch_size * torch.cuda.device_count(),
+            #     drop_last=False,
+            #     collate_fn=TextDatasetLMDBMeta.get_collate_fn(tokenizer.pad_token_id),
+            #     pin_memory=True, persistent_workers=True,
+            #     num_workers=eval_config.dataloader_num_workers,
+            # )
             id_list, embeddings_list = inference(model, corpus_loader)
             logger.info(f"Corpus embeddings shape: {embeddings_list.shape}")
             store_embeddings(id_list, embeddings_list, eval_config.embedding_output_dir, "corpus_shard{:02d}".format(shard_id))
