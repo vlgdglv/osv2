@@ -58,11 +58,12 @@ class MARCOWSTestIdsDataset(Dataset):
             text_ids = pickle.loads(doc_pool_txn.get(real_index.encode()))
         encoded_text = self.tokenizer.prepare_for_model(
             text_ids,
+            padding=True,  
             max_length=self.max_length,
             truncation=True,
             return_token_type_ids=False,
-            return_attention_mask=False,
-            add_special_tokens=True
+            return_attention_mask=True,
+            add_special_tokens=False
         )
         return real_index, encoded_text
 

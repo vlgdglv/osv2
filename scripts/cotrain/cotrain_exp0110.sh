@@ -43,7 +43,7 @@ splade_build_index() {
         --do_corpus_index True \
         --force_build_index True \
         --output_dir runs/encode_corpus \
-        --passage_lmdb_dir $BASE_DIR/data/lmdb_data/test_ids_lmdb \
+        --passage_lmdb_dir $BASE_DIR/data/lmdb_data/test_ids_lmdb_v2 \
         --idmapping_path $BASE_DIR/data/training_data/id2id_test.json \
         --model_name_or_path runs/marcows/$TRAIN_NAME \
         --tokenizer_name bert-base-multilingual-uncased  \
@@ -133,7 +133,7 @@ encode_corpus() {
         --tokenizer_name bert-base-multilingual-uncased  \
         --task_list sent \
         --fp16 \
-        --per_device_eval_batch_size 8192 \
+        --per_device_eval_batch_size 2048 \
         --dataloader_num_workers 32 \
         --k_max_len 128 \
         --embedding_output_dir $BASE_DIR/embeddings/$TRAIN_NAME \
@@ -162,7 +162,7 @@ splade_build_index() {
         --do_corpus_index True \
         --force_build_index True \
         --output_dir runs/encode_corpus \
-        --passage_lmdb_dir $BASE_DIR/data/lmdb_data/test_ids_lmdb \
+        --passage_lmdb_dir $BASE_DIR/data/lmdb_data/test_ids_lmdb_v2 \
         --idmapping_path $BASE_DIR/data/training_data/id2id_test.json \
         --model_name_or_path runs/marcows/$TRAIN_NAME \
         --tokenizer_name bert-base-multilingual-uncased  \
@@ -173,7 +173,6 @@ splade_build_index() {
         --index_dir splade_index/$TRAIN_NAME \
         --index_filename splade_index.bin \
         --k_max_len 128 \
-        --kterm_num 150 \
         --sparse_pooler_type max \
         --vocab_size 105879 \
         --shards_num 5 \
@@ -181,8 +180,8 @@ splade_build_index() {
 }
 
 
-train
-encode_query  
-encode_corpus
-# splade_build_index
+# train
+# encode_query  
+# encode_corpus
+splade_build_index
 # search
