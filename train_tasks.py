@@ -120,7 +120,7 @@ class MultiTaskTrainer(Trainer):
                  warmup_step_reg: float = -1.0,
                  reg_T: int = 1000,
                  temperature: float = 1.0,
-                 distill_form: str = "kl_div",
+                 distill_method: str = "kl_div",
                  *args, **kwargs):
         super(MultiTaskTrainer, self).__init__(*args, **kwargs)
         self.info_loss = InfoNCE(temperature)
@@ -150,8 +150,14 @@ class MultiTaskTrainer(Trainer):
         self.reg_method = reg_method
         self.temperature = temperature 
         self.onesparse_score = onesparse_score
-        self.distill_form = distill_form
-
+        self.distill_method = distill_method
+        if self.distill_method == "ce":
+            self.distill_func = ce_distill_func
+        elif self.distill_method == "kl_div":
+            self.distill_func = kl_div_distill_func
+        else:
+            raise NotImplementedError
+        
         reg_balance_weights = reg_balance_weights.strip().split(",")
         if len(reg_balance_weights) == 2:
             self.fixed_balance = True
@@ -252,15 +258,9 @@ class MultiTaskTrainer(Trainer):
                 dense_probs = F.softmax(dense_sim_scores, dim=-1)
                 sparse_probs = F.softmax(sparse_sim_scores, dim=-1)
                 sim_probs = F.softmax(sim_scores, dim=-1)
-                if self.distill_form == "kl_div":
-                    os_distill_loss = F.kl_div(dense_probs.log(), sim_probs, reduction='batchmean') + \
-                                      F.kl_div(sparse_probs.log(), sim_probs, reduction='batchmean')
-                elif self.distill_form == "ce":
-                    os_distill_loss = -torch.sum(sim_scores * dense_probs.log(), dim=-1).mean() + \
-                                      -torch.sum(sim_scores * sparse_probs.log(), dim=-1).mean()
-                    print(os_distill_loss)
-                else:
-                    raise NotImplementedError
+                sim_probs = sim_probs.detach()
+                os_distill_loss = self.distill_func(sim_probs, dense_probs) + self.distill_func(sim_probs, sparse_probs)
+                
                 loss += os_distill_loss * self.os_distill_weight
         else:
             os_distill_loss = 0.0 
@@ -289,19 +289,18 @@ class MultiTaskTrainer(Trainer):
         logger.info("Saving model checkpoint to %s", output_dir)
         self.model.save_models(output_dir)   
 
+def kl_div_distill_func(teacher, student):
+    return F.kl_div(student.log(), teacher, reduction='batchmean')
+
+def ce_distill_func(teacher, student):
+    return -torch.mean(torch.sum(student.log() * teacher, dim=-1))
+
 
 def main():
     parser = HfArgumentParser((TrainConfig, DataConfig, ModelConfig))
 
     training_config, data_config, model_config = parser.parse_args_into_dataclasses()
     training_config: TrainConfig
-    data_config: DataConfig
-    model_config: ModelConfig
-    
-    training_config.output_dir = os.path.join(training_config.output_dir, training_config.train_name)
-    if (os.path.exists(training_config.output_dir) and os.listdir(training_config.output_dir) 
-        and training_config.do_train and not training_config.overwrite_output_dir):
-        raise ValueError(f"Output directory ({training_config.output_dir}) already exists and is not empty. Use --overwrite_output_dir to overcome.")
 
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s -  %(message)s",
@@ -370,6 +369,7 @@ def main():
         reg_method=training_config.reg_method,
         reg_balance_weights=training_config.reg_balance_weights,
         warmup_step_reg=training_config.warmup_step_reg,
+        distill_method=training_config.distill_method
     )
 
     # if training_config.resume_from_ckpt_path is not None: 

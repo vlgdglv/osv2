@@ -491,6 +491,8 @@ class TrainConfig(TrainingArguments):
     onesparse_score: Optional[bool] = field(default=False)
     onesparse_distill: Optional[bool] = field(default=False)
     os_distill_weight: float = field(default=0.0)
+    distill_method: str = field(default="kl_div")
+    weighted_hybrid: Optional[bool] = field(default=False)
 
     eval_gt_path: str = field(default=None)
     eval_interval: int = field(default=1000)

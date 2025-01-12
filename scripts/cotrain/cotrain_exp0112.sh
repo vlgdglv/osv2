@@ -6,7 +6,7 @@ export ROCM_LOG_LEVEL=5
 # BASE_DIR=/datacosmos/local/User/baoht/onesparse2/marcov2/
 BASE_DIR=/datacosmos/User/baoht/onesparse2/marcov2
 
-TRAIN_NAME=cotrain_exp0111
+TRAIN_NAME=cotrain_exp0112
 train(){
     # python -m torch.distributed.launch --nproc_per_node=16 \
     torchrun --nproc_per_node=16 \
@@ -24,8 +24,9 @@ train(){
         --save_steps 1000 \
         --learning_rate 1e-5 \
         --num_train_epochs 1 \
-        --num_neg 7 \
-        --per_device_train_batch_size 16 \
+        --num_neg 15 \
+        --per_device_train_batch_size 8 \
+        --gradient_accumulation_steps 4 \
         --dataloader_num_workers 32 \
         --logging_steps 100 \
         --warmup_ratio 0.2 \
@@ -176,7 +177,7 @@ splade_build_index() {
         --sparse_pooler_type max \
         --vocab_size 105879 \
         --shards_num 5 \
-        --start_shard -1
+        --start_shard 3
 }
 
 # train
