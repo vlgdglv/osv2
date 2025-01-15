@@ -6,7 +6,7 @@ export ROCM_LOG_LEVEL=5
 # BASE_DIR=/datacosmos/local/User/baoht/onesparse2/marcov2/
 BASE_DIR=/datacosmos/User/baoht/onesparse2/marcov2/
 
-TRAIN_NAME=wu_exp1222
+TRAIN_NAME=warmup_splade
 train(){
     # python -m torch.distributed.launch --nproc_per_node=16 \
     torchrun --nproc_per_node=16 \
@@ -98,14 +98,13 @@ splade_build_index() {
         --index_dir splade_index/$TRAIN_NAME \
         --index_filename splade_index.bin \
         --k_max_len 128 \
-        --kterm_num 150 \
         --sparse_pooler_type max \
         --vocab_size 105879 \
         --shards_num 5
 }
 
 # train
-# splade_build_index
+splade_build_index
 # test_splade
-splade_encode_query
-splade_search
+# splade_encode_query
+# splade_search

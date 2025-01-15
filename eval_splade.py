@@ -130,7 +130,8 @@ class SparseIndex(Evalutator):
                 else:
                     rows, doc_dim = torch.nonzero(outputs, as_tuple=True)
                     values = outputs[rows.detach().cpu().tolist(), doc_dim.detach().cpu().tolist()]
-
+                    rows = rows.detach().cpu() + row_count
+                # print(values.shape)
                 row_count += outputs.size(0)
                 doc_ids.extend(text_id)
                 self.invert_index.add_batch_item(rows, doc_dim.view(-1).cpu().numpy(), values.view(-1).cpu().numpy())
@@ -181,6 +182,7 @@ class SparseRetriever(Evalutator):
                 indices = np.array([int(self.doc_ids[i]) for i in indices])
                 # print(indices)
                 res[int(query["text_id"])] = [indices, scores]  
+                # break
         return res
     
     def retrieve(self, query_loader, top_k=100, threshold=0):
@@ -460,30 +462,27 @@ def splade_eval():
     if eval_config.do_retrieve_from_json: 
         logger.info("--------------------- RETRIEVAL FROM JSON PROCEDURE ---------------------")
         shards_num = eval_config.shards_num
+        start_shard = eval_config.start_shard
         assert shards_num > 0
         model = full_model.q_encoder
         
         res_full = {}
         pool = mp.Pool(processes=shards_num)
         results = []
-        for shard_id in range(shards_num):
+        for shard_id in range(start_shard, start_shard+shards_num):
             results.append(pool.apply_async(search_in_shard, args=(shard_id, eval_config)))
-            
+        
         pool.close()
         pool.join()
         for result in results:
             shard_id, res = result.get()
             for k, v in res.items():
-                if shard_id == 0:
+                if k not in res_full:
                     res_full[k] = v
                 else:
                     res_full[k][0] = np.concatenate((res_full[k][0], v[0]), axis=0) # Indices
                     res_full[k][1] = np.concatenate((res_full[k][1], v[1]), axis=0) # Scores
 
-        #         break
-        # for k, v in res_full.items():
-        #     print(k, v)
-        #     break
         top_k = eval_config.retrieve_topk
         for k, v in tqdm(res_full.items(), total=len(res_full), desc="Select topk"):
             indices, scores = v
