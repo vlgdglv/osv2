@@ -5,7 +5,7 @@ export ROCM_LOG_LEVEL=5
 
 # BASE_DIR=/datacosmos/local/User/baoht/onesparse2/marcov2/
 BASE_DIR=/datacosmos/User/baoht/onesparse2/marcov2
-TRAIN_NAME=cotrain_exp0116
+TRAIN_NAME=cotrain_exp0117
 train(){
     # python -m torch.distributed.launch --nproc_per_node=16 \
     torchrun --nproc_per_node=16 \
@@ -17,10 +17,10 @@ train(){
         --fp16  \
         --model_name_or_path models/init_cotrain \
         --tokenizer_name bert-base-multilingual-uncased \
-        --train_example_dirs $BASE_DIR/data/training_data/training_easy0108 \
+        --train_example_dirs $BASE_DIR/data/training_data/training_mid \
         --passage_lmdb_dir $BASE_DIR/data/lmdb_data/train_ids_lmdb \
         --query_lmdb_dir $BASE_DIR/data/lmdb_data/train_queries \
-        --save_steps 1000 \
+        --save_steps 10000 \
         --learning_rate 1e-5 \
         --num_train_epochs 1 \
         --num_neg 15 \
