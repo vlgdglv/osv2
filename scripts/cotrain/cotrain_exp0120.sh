@@ -5,7 +5,7 @@ export ROCM_LOG_LEVEL=5
 
 # BASE_DIR=/datacosmos/local/User/baoht/onesparse2/marcov2/
 BASE_DIR=/datacosmos/User/baoht/onesparse2/marcov2
-TRAIN_NAME=cotrain_exp0117
+TRAIN_NAME=cotrain_exp0120
 train(){
     # python -m torch.distributed.launch --nproc_per_node=16 \
     torchrun --nproc_per_node=16 \
@@ -21,7 +21,7 @@ train(){
         --passage_lmdb_dir $BASE_DIR/data/lmdb_data/train_ids_lmdb \
         --query_lmdb_dir $BASE_DIR/data/lmdb_data/train_queries \
         --save_steps 10000 \
-        --learning_rate 1e-5 \
+        --learning_rate 1e-6 \
         --num_train_epochs 1 \
         --num_neg 15 \
         --per_device_train_batch_size 8 \
@@ -44,13 +44,13 @@ splade_encode_query() {
         --output_dir runs/encode_corpus \
         --query_lmdb_dir $BASE_DIR/data/lmdb_data/test_queries \
         --idmapping_path $BASE_DIR/data/test_qid_lookup.json \
-        --model_name_or_path $BASE_DIR/runs/cotrain/cotrain_exp0117 \
+        --model_name_or_path runs/marcows/$TRAIN_NAME \
         --tokenizer_name bert-base-multilingual-uncased  \
         --task_list sparse \
         --fp16 \
         --per_device_eval_batch_size 1 \
         --dataloader_num_workers 32 \
-        --index_dir $BASE_DIR/warehouse/splade_index/cotrain_exp0117 \
+        --index_dir splade_index/$TRAIN_NAME \
         --retrieve_result_output_dir splade_results/$TRAIN_NAME \
         --save_name test.query.json \
         --q_max_len 32 \
@@ -156,9 +156,8 @@ splade_build_index() {
         --start_shard 0
 }
 
-# train
-# encode_query  
-# encode_corpus
-# splade_build_index
+train
+encode_query  
+encode_corpus
+splade_build_index
 # search
-splade_encode_query

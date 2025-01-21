@@ -156,7 +156,6 @@ class SparseRetriever(Evalutator):
         
         self.invert_index = InvertedIndex(index_dir, config.index_filename)
         self.doc_ids = pickle.load(open(os.path.join(index_dir, "doc_ids_{}.pkl".format(config.index_filename)), "rb"))
-        
         self.numba_index_doc_ids = numba.typed.Dict()
         self.numba_index_doc_values = numba.typed.Dict()
 
@@ -303,7 +302,10 @@ def splade_eval():
     # if model_config.sparse_shared_encoder:
     #     model = SparseSharedEncoder.build_model(model_config)
     # else:
-    full_model = BiEncoder(model_config)
+    if eval_config.do_retrieve_from_json:
+        pass
+    else:
+        full_model = BiEncoder(model_config)
     
     
     logger.info("Model loaded.")
@@ -464,30 +466,37 @@ def splade_eval():
         shards_num = eval_config.shards_num
         start_shard = eval_config.start_shard
         assert shards_num > 0
-        model = full_model.q_encoder
         
-        res_full = {}
-        pool = mp.Pool(processes=shards_num)
-        results = []
-        for shard_id in range(start_shard, start_shard+shards_num):
-            results.append(pool.apply_async(search_in_shard, args=(shard_id, eval_config)))
-        
-        pool.close()
-        pool.join()
-        for result in results:
-            shard_id, res = result.get()
-            for k, v in res.items():
-                if k not in res_full:
-                    res_full[k] = v
-                else:
-                    res_full[k][0] = np.concatenate((res_full[k][0], v[0]), axis=0) # Indices
-                    res_full[k][1] = np.concatenate((res_full[k][1], v[1]), axis=0) # Scores
+        if shards_num == 1:
+            retriever = SparseRetriever(
+                None,
+                eval_config.index_dir,
+                eval_config
+            )
+            res_full = retriever.retrieve_from_json(eval_config.query_json_path, top_k=eval_config.retrieve_topk)     
+        else:
+            res_full = {}
+            pool = mp.Pool(processes=shards_num)
+            results = []
+            for shard_id in range(start_shard, start_shard+shards_num):
+                results.append(pool.apply_async(search_in_shard, args=(shard_id, eval_config)))
+            
+            pool.close()
+            pool.join()
+            for result in results:
+                shard_id, res = result.get()
+                for k, v in res.items():
+                    if k not in res_full:
+                        res_full[k] = v
+                    else:
+                        res_full[k][0] = np.concatenate((res_full[k][0], v[0]), axis=0) # Indices
+                        res_full[k][1] = np.concatenate((res_full[k][1], v[1]), axis=0) # Scores
 
-        top_k = eval_config.retrieve_topk
-        for k, v in tqdm(res_full.items(), total=len(res_full), desc="Select topk"):
-            indices, scores = v
-            indices, scores = SparseRetriever.select_topk(indices, scores, k=top_k)
-            res_full[int(k)] = indices, scores
+            top_k = eval_config.retrieve_topk
+            for k, v in tqdm(res_full.items(), total=len(res_full), desc="Select topk"):
+                indices, scores = v
+                indices, scores = SparseRetriever.select_topk(indices, scores, k=top_k)
+                res_full[int(k)] = indices, scores
             
 
         if eval_config.eval_gt_path:

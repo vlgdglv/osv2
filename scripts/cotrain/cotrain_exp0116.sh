@@ -153,11 +153,11 @@ splade_build_index() {
         --sparse_pooler_type max \
         --vocab_size 105879 \
         --shards_num 5 \
-        --start_shard 0
+        --start_shard 3
 }
 
-train
-encode_query  
-encode_corpus
+# train
+# encode_query  
+# encode_corpus
 splade_build_index
 # search

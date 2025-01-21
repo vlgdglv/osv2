@@ -74,6 +74,54 @@ def modify_index():
     invert_index.file_path = save_path
     invert_index.save()
 
+
+def merge_index():
+    index_dir = "/datacosmos/User/baoht/onesparse2/marcov2/warehouse/splade_index/cotrain_exp0117"
+    shard_count = 5
+
+    full_index = InvertedIndex(index_path="/datacosmos/User/baoht/onesparse2/marcov2/warehouse/splade_index/cotrain_exp0117/",
+                               file_name="splade_full.bin",
+                               ignore_keys=False,
+                               force_rebuild=True)
+    
+    for shard_id in range(shard_count):
+        shard_index = InvertedIndex(index_path=os.path.join(index_dir, f"shard_{shard_id}"), 
+                      file_name="splade_index.bin",
+                      ignore_keys=False)
+        full_index.total_docs += shard_index.total_docs
+        key_list = shard_index.index_ids.keys()
+        for key in tqdm(key_list):
+            shard_ids = shard_index.index_ids[key]
+            shard_values = shard_index.index_values[key]
+            
+            if key in full_index.index_ids.keys():
+                full_index.index_ids[key].extend(shard_ids)
+                full_index.index_values[key].extend(shard_values)
+                
+            else:
+                full_index.index_ids[key] = list(shard_ids)
+                full_index.index_values[key] = list(shard_values)
+
+        print("shard {} done".format(shard_id))
+    full_index.save()
+
+def merge_docid():
+    index_dir = "/datacosmos/User/baoht/onesparse2/marcov2/warehouse/splade_index/cotrain_exp0117"
+    shard_count = 5
+
+    doc_ids_full = []
+    for shard_id in range(shard_count):
+        doc_ids = pickle.load(open(os.path.join(index_dir, "shard_{}/doc_ids_splade_index.bin.pkl".format(shard_id)), "rb"))
+        doc_ids_full.extend(doc_ids)
+
+    save_name = "doc_ids_splade_full.bin.pkl"
+    print(len(doc_ids_full))
+    pickle.dump(doc_ids_full, open(os.path.join(index_dir, save_name), "wb"))
+
+
 if __name__ == "__main__":
     # test_index()
-    modify_index()
+    # modify_index()
+    merge_index()
+    # test_merge()
+    # merge_docid()

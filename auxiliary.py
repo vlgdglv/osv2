@@ -545,7 +545,7 @@ class EvaluationConfig(TrainingArguments):
     save_name: str = field(default=None)
 
     shards_num: int = field(default=-1)
-    start_shard: int = field(default=-1)
+    start_shard: int = field(default=0)
 
     def __post_init__(self):
         if self.index_filename is None:
@@ -557,12 +557,14 @@ if __name__ == "__main__":
     parser.add_argument("--cvt_lookup", action="store_true")
     parser.add_argument("--cvt_query", action="store_true")
     parser.add_argument("--cvt_gt", action="store_true")
+    parser.add_argument("--resort_query", action="store_true")
 
     parser.add_argument("--embedding_dir", type=str, required=False)
     parser.add_argument("--embedding_name", type=str, required=False)
 
     parser.add_argument("--input_path", type=str, required=False)
     parser.add_argument("--output_path", type=str, required=False)
+    parser.add_argument("--output_dir", type=str, required=False)
     parser.add_argument("--lookup_path", type=str, required=False)
     parser.add_argument("--query_path", type=str, required=False)
     parser.add_argument("--gt_path", type=str, required=False, default="data/msmarco/qrels.dev.tsv")
@@ -578,3 +580,21 @@ if __name__ == "__main__":
             lookup = pickle.load(f)
         lookup = lookup.reshape(-1, 1)
         write_ibin(args.output_path, lookup)
+    if args.resort_query:
+        query_embedding = read_fbin(args.query_path)
+        qlookup = read_ibin(args.lookup_path)
+        qid2idx = {}
+        for i in tqdm(range(len(qlookup))):
+            qid2idx[qlookup[i, 0]] = i
+        query_embedding_rerange, qlookup_rerange =  [], []
+        with open("/datacosmos/User/baoht/onesparse2/marcov2/index/bm25_test/query_ids.test.json") as fr:
+            for line in fr:
+                content = json.loads(line.strip())
+                qid = int(content["text_id"])
+                query_embedding_rerange.append(query_embedding[qid2idx[qid]])
+                qlookup_rerange.append(qlookup[qid2idx[qid]])
+        query_embedding_rerange = np.array(query_embedding_rerange, dtype=np.float32)
+        qlookup_rerange = np.array(qlookup_rerange, dtype=np.int32)
+        write_fbin(os.path.join(args.output_dir, "query_embedding_rerange.fbin"), query_embedding_rerange)
+        qlookup_rerange = qlookup_rerange.reshape(-1, 1)
+        write_ibin(os.path.join(args.output_dir, "query_ids_rerange.ibin"), qlookup_rerange)

@@ -58,24 +58,24 @@ splade_search() {
         --output_dir runs/encode_corpus \
         --query_lmdb_dir $BASE_DIR/data/lmdb_data/test_queries \
         --idmapping_path $BASE_DIR/data/test_qid_lookup.json \
-        --model_name_or_path runs/marcows/warmup_splade  \
+        --model_name_or_path $BASE_DIR/warehouse/warmup_splade  \
         --tokenizer_name bert-base-multilingual-uncased  \
         --task_list sparse \
         --fp16 \
         --per_device_eval_batch_size 1 \
         --dataloader_num_workers 32 \
-        --index_dir splade_index/warmup \
+        --index_dir $BASE_DIR/warehouse/splade_index/cotrain_exp0117 \
         --index_filename splade_index.bin \
         --retrieve_result_output_dir splade_results/warmup \
-        --query_json_path splade_index/warmup/test.query.json \
+        --query_json_path $BASE_DIR/warehouse/splade_index/cotrain_exp0117/test.query.json \
         --q_max_len 32 \
-        --qterm_num 32 \
         --sparse_pooler_type max \
         --vocab_size 105879 \
         --shards_num 5 \
         --retrieve_topk 100 \
         --eval_gt_path $BASE_DIR/data/qrels_test.tsv        
 }
+
 
 # splade_encode_query
 # splade_build_index
