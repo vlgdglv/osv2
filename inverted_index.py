@@ -155,7 +155,7 @@ class InvertedIndex:
                 continue
             self.index_ids[c].append(int(r))
             self.index_values[c].append(v)
-        self.total_docs += len(set(row))
+        self.total_docs += len(set(col))
     
     def delete_item(self, key_list):
         for key in key_list:
