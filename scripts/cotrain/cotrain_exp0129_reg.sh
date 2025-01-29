@@ -5,7 +5,7 @@ export ROCM_LOG_LEVEL=5
 
 # BASE_DIR=/datacosmos/local/User/baoht/onesparse2/marcov2/
 BASE_DIR=/datacosmos/User/baoht/onesparse2/marcov2
-TRAIN_NAME=cotrain_exp0126_osregdis
+TRAIN_NAME=cotrain_exp0129_reg
 train(){
     # python -m torch.distributed.launch --nproc_per_node=16 \
     torchrun --nproc_per_node=16 \
@@ -17,12 +17,12 @@ train(){
         --fp16  \
         --model_name_or_path models/init_cotrain \
         --tokenizer_name bert-base-multilingual-uncased \
-        --train_example_dirs $BASE_DIR/data/training_data/training_easy0108 \
+        --train_example_dirs $BASE_DIR/data/training_data/training_mid \
         --passage_lmdb_dir $BASE_DIR/data/lmdb_data/train_ids_lmdb \
         --query_lmdb_dir $BASE_DIR/data/lmdb_data/train_queries \
         --save_steps 10000 \
         --learning_rate 1e-5 \
-        --num_train_epochs 2 \
+        --num_train_epochs 1 \
         --num_neg 15 \
         --per_device_train_batch_size 8 \
         --gradient_accumulation_steps 4 \
@@ -34,13 +34,15 @@ train(){
         --sparse_loss_weight 0.01 \
         --dense_loss_weight 1.0 \
         --reg_T 10000 \
-        --q_reg_lambda 0.002 \
-        --k_reg_lambda 0.001 \
+        --q_reg_lambda 0.5 \
+        --k_reg_lambda 0.4 \
+        --use_self_reg  True \
         --warmup_step_reg 5000 \
         --onesparse_score True \
-        --os_distill_weight 0.1 \
         --os_distill_weight 1.0 \
         --onesparse_distill True 
+    
+    cp -r runs/marcows/$TRAIN_NAME $BASE_DIR/runs/cotrain/
 }
 
 splade_encode_query() {
@@ -152,7 +154,7 @@ splade_build_index() {
         --fp16 \
         --per_device_eval_batch_size 256 \
         --dataloader_num_workers 32 \
-        --index_dir splade_index/$TRAIN_NAME \
+        --index_dir $BASE_DIR/warehouse/splade_index/$TRAIN_NAME \
         --index_filename splade_index.bin \
         --k_max_len 128 \
         --sparse_pooler_type max \

@@ -198,7 +198,10 @@ class MultiTaskTrainer(Trainer):
 
         loss += dense_loss
         if self.tasks[1]:
-            sparse_loss = sparse_rep_loss * self.sparse_loss_weight + q_lambda * q_reg_loss + k_lambda * k_reg_loss
+            # before 01/29
+            # sparse_loss = sparse_rep_loss * self.sparse_loss_weight + q_lambda * q_reg_loss + k_lambda * k_reg_loss
+            # after 01/29:
+            sparse_loss =  (sparse_rep_loss + q_lambda * q_reg_loss + k_lambda * k_reg_loss) * self.sparse_loss_weight
         else:
             sparse_loss = torch.tensor(0.0, device=model.device)
             q_reg_loss, k_reg_loss = 0, 0
