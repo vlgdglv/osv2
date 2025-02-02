@@ -127,7 +127,10 @@ class MultiTaskTrainer(Trainer):
         self.info_loss = InfoNCE(temperature)
         self.q_reg_scheduler = RegularizerScheduler(q_lambda, reg_T)
         self.k_reg_scheduler = RegularizerScheduler(k_lambda, reg_T)
-        self.sparse_scheduler = RegularizerScheduler(sparse_loss_weight, sparse_T)
+        if sparse_T > 0:
+            self.sparse_scheduler = RegularizerScheduler(sparse_loss_weight, sparse_T)
+        else:
+            self.sparse_scheduler = None
         self.regularizer = FLOPS()
 
         self.cross_entropy = nn.CrossEntropyLoss(reduction='mean')
@@ -205,7 +208,10 @@ class MultiTaskTrainer(Trainer):
             # after 01/29:
             # sparse_loss =  (sparse_rep_loss + q_lambda * q_reg_loss + k_lambda * k_reg_loss) * self.sparse_loss_weight
             # 02/02
-            sparse_weight = self.sparse_scheduler.step()
+            if self.sparse_scheduler is not None:
+                sparse_weight = self.sparse_scheduler.step()
+            else:
+                sparse_weight = self.sparse_loss_weight
             sparse_loss = sparse_rep_loss * sparse_weight + q_lambda * q_reg_loss + k_lambda * k_reg_loss
         else:
             sparse_loss = torch.tensor(0.0, device=model.device)
