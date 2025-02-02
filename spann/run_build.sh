@@ -2,6 +2,8 @@ export NCCL_DEBUG=WARN
 export PYTHONPATH=/home/aiscuser/SPTAG/Release:PYTHONPATH
 
 NAME=$1
+
+
 do_transform(){
     python transform.py \
         --corpus_path ../embeddings/bs_SimANS_36k/test_corpus.bin \
@@ -10,8 +12,8 @@ do_transform(){
 
 do_build() {
     python build_spann.py \
-        --name bs_SimANS_36k \
-        --corpus_path /datacosmos/local/User/baoht/onesparse2/marcov2/embeddings/bs_SimANS_36k/test_corpus.bin
+        --name ${NAME} \
+        --corpus_path /datacosmos/User/baoht/onesparse2/marcov2/embeddings/${NAME}/corpus_test.fbin
 }
 
 extract_centroids() {
@@ -19,5 +21,5 @@ extract_centroids() {
 }
 
 # do_transform
-# do_build
-extract_centroids
+do_build
+# extract_centroids

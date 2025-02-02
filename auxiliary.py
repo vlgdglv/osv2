@@ -473,6 +473,7 @@ class TrainConfig(TrainingArguments):
     q_reg_lambda: float = field(default=0.0003)
     k_reg_lambda: float = field(default=0.0001)
     reg_T: int = field(default=10000)
+    sparse_T: int = field(default=10000)
     train_name: Optional[str] = field(default=None)
     intrain_topk_kterm: Optional[int] = field(default=None)
     intrain_topk_qterm: Optional[int] = field(default=None)

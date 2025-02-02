@@ -118,6 +118,7 @@ class MultiTaskTrainer(Trainer):
                  reg_method: str = "d2s",
                  reg_balance_weights: str = "0.1,0.1",
                  warmup_step_reg: float = -1.0,
+                 sparse_T: int = 1000,
                  reg_T: int = 1000,
                  temperature: float = 1.0,
                  distill_method: str = "kl_div",
@@ -126,6 +127,7 @@ class MultiTaskTrainer(Trainer):
         self.info_loss = InfoNCE(temperature)
         self.q_reg_scheduler = RegularizerScheduler(q_lambda, reg_T)
         self.k_reg_scheduler = RegularizerScheduler(k_lambda, reg_T)
+        self.sparse_scheduler = RegularizerScheduler(sparse_loss_weight, sparse_T)
         self.regularizer = FLOPS()
 
         self.cross_entropy = nn.CrossEntropyLoss(reduction='mean')
@@ -201,7 +203,10 @@ class MultiTaskTrainer(Trainer):
             # before 01/29
             # sparse_loss = sparse_rep_loss * self.sparse_loss_weight + q_lambda * q_reg_loss + k_lambda * k_reg_loss
             # after 01/29:
-            sparse_loss =  (sparse_rep_loss + q_lambda * q_reg_loss + k_lambda * k_reg_loss) * self.sparse_loss_weight
+            # sparse_loss =  (sparse_rep_loss + q_lambda * q_reg_loss + k_lambda * k_reg_loss) * self.sparse_loss_weight
+            # 02/02
+            sparse_weight = self.sparse_scheduler.step()
+            sparse_loss = sparse_rep_loss * sparse_weight + q_lambda * q_reg_loss + k_lambda * k_reg_loss
         else:
             sparse_loss = torch.tensor(0.0, device=model.device)
             q_reg_loss, k_reg_loss = 0, 0
@@ -366,6 +371,7 @@ def main():
         q_lambda=training_config.q_reg_lambda,
         k_lambda=training_config.k_reg_lambda,
         reg_T=training_config.reg_T,
+        sparse_T=training_config.sparse_T,
         temperature=training_config.temperature,
         use_self_reg=training_config.use_self_reg,
         self_reg_weight=training_config.self_reg_weight,
